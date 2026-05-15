@@ -2,7 +2,6 @@
 
 export const CONFIG = {
   // Job titles MUST contain at least one of these keywords (case-insensitive).
-  // We match on title primarily because descriptions are noisy.
   titleKeywords: [
     "php",
     "laravel",
@@ -14,9 +13,7 @@ export const CONFIG = {
     "full-stack",
   ],
 
-  // Title must ALSO contain at least one of these seniority signals,
-  // OR have NO seniority word at all (then we let it pass — could be mid).
-  // We exclude clear juniors / interns.
+  // Title must NOT contain any of these (case-insensitive).
   excludeTitleKeywords: [
     "junior",
     "jr.",
@@ -28,7 +25,7 @@ export const CONFIG = {
     "entry level",
     "entry-level",
     "apprentice",
-    "lead engineer", // tech leads are usually too senior; comment out if you want them
+    "lead engineer",
     "principal",
     "staff engineer",
     "engineering manager",
@@ -49,9 +46,7 @@ export const CONFIG = {
     "ml engineer",
   ],
 
-  // Location must signal remote-friendly to Egypt/EMEA.
-  // If location text matches any of these, the job passes location filter.
-  // If location text is empty/unknown, we keep it and let you decide.
+  // Location must match one of these patterns (remote-friendly to Egypt/EMEA).
   remoteFriendlyPatterns: [
     /remote/i,
     /worldwide/i,
@@ -66,7 +61,7 @@ export const CONFIG = {
     /wfh/i,
   ],
 
-  // Hard reject if location ONLY mentions these regions (no remote)
+  // Hard reject if location ONLY mentions these regions
   hardRejectLocationPatterns: [
     /^us only$/i,
     /^usa only$/i,
@@ -77,8 +72,7 @@ export const CONFIG = {
     /^americas only$/i,
   ],
 
-  // Locations that we highlight as priority (Egypt + GCC + nearby)
-  // These tags appear in the Priority column of the sheet.
+  // Locations that get the ⭐ PRIORITY tag
   priorityLocationPatterns: [
     /egypt/i,
     /cairo/i,
@@ -101,9 +95,12 @@ export const CONFIG = {
     remoteok: { enabled: true },
     weworkremotely: { enabled: true },
     larajobs: { enabled: true },
-    laravelio: { enabled: true },
+    laravelio: { enabled: false },   // disabled — site structure changed, not fixed
+    remotive: { enabled: true },        // NEW
+    workingnomads: { enabled: true },   // NEW
+    jobspresso: { enabled: true },      // NEW
   },
 
-  // How many days back to keep listings (older ones get dropped)
+  // How many days back to keep listings
   maxAgeDays: 30,
 };

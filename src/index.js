@@ -5,10 +5,21 @@ import { fetchRemoteOK } from "./sources/remoteok.js";
 import { fetchWeWorkRemotely } from "./sources/weworkremotely.js";
 import { fetchLarajobs } from "./sources/larajobs.js";
 import { fetchLaravelIO } from "./sources/laravelio.js";
+import { fetchRemotive } from "./sources/remotive.js";
+import { fetchWorkingNomads } from "./sources/workingnomads.js";
+import { fetchJobspresso } from "./sources/jobspresso.js";
 import { filterJobs } from "./filter.js";
 import { writeJobsToSheet } from "./sheets.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
+
+async function runSource(name, enabled, fn) {
+  if (!enabled) return [];
+  console.log(`Fetching ${name}...`);
+  const jobs = await fn();
+  console.log(`  → ${jobs.length} raw`);
+  return jobs;
+}
 
 async function main() {
   console.log(`=== Job Tracker — ${new Date().toISOString()} ===`);
@@ -16,30 +27,13 @@ async function main() {
 
   const all = [];
 
-  if (CONFIG.sources.remoteok.enabled) {
-    console.log("Fetching RemoteOK...");
-    const jobs = await fetchRemoteOK();
-    console.log(`  → ${jobs.length} raw`);
-    all.push(...jobs);
-  }
-  if (CONFIG.sources.weworkremotely.enabled) {
-    console.log("Fetching WeWorkRemotely...");
-    const jobs = await fetchWeWorkRemotely();
-    console.log(`  → ${jobs.length} raw`);
-    all.push(...jobs);
-  }
-  if (CONFIG.sources.larajobs.enabled) {
-    console.log("Fetching Larajobs...");
-    const jobs = await fetchLarajobs();
-    console.log(`  → ${jobs.length} raw`);
-    all.push(...jobs);
-  }
-  if (CONFIG.sources.laravelio.enabled) {
-    console.log("Fetching Laravel.io...");
-    const jobs = await fetchLaravelIO();
-    console.log(`  → ${jobs.length} raw`);
-    all.push(...jobs);
-  }
+  all.push(...(await runSource("RemoteOK", CONFIG.sources.remoteok.enabled, fetchRemoteOK)));
+  all.push(...(await runSource("WeWorkRemotely", CONFIG.sources.weworkremotely.enabled, fetchWeWorkRemotely)));
+  all.push(...(await runSource("Larajobs", CONFIG.sources.larajobs.enabled, fetchLarajobs)));
+  all.push(...(await runSource("Laravel.io", CONFIG.sources.laravelio.enabled, fetchLaravelIO)));
+  all.push(...(await runSource("Remotive", CONFIG.sources.remotive.enabled, fetchRemotive)));
+  all.push(...(await runSource("WorkingNomads", CONFIG.sources.workingnomads.enabled, fetchWorkingNomads)));
+  all.push(...(await runSource("Jobspresso", CONFIG.sources.jobspresso.enabled, fetchJobspresso)));
 
   console.log(`Total raw jobs: ${all.length}`);
   const filtered = filterJobs(all);
