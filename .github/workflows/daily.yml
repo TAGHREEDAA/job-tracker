@@ -1,0 +1,29 @@
+name: Daily Job Tracker
+
+on:
+  schedule:
+    # Runs daily at 06:00 UTC = 08:00 Cairo (UTC+2) / 09:00 Cairo in DST
+    - cron: '0 6 * * *'
+  workflow_dispatch: # allows manual trigger from GitHub UI
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Run tracker
+        env:
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: npm start
