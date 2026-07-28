@@ -11,16 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2 # Fixed: Uses Node 24 runtime internally
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.2.0 # Fixed: Switched internal runner to Node 24
         with:
-          node-version: '20'
+          node-version: '22' # Fixed: Upgraded your app runner to Node 22 (current LTS)
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm ci # Fixed: Removed 'npm install' fallback to enforce lockfile speed
 
       - name: Run tracker
         env:
