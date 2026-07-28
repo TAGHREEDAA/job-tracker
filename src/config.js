@@ -112,6 +112,12 @@ export const CONFIG = {
     productjobsanywhere: { enabled: true },
   },
 
+  spreadsheet: {
+    backendSheetName: "Backend Jobs",
+    productSheetName: "Product Jobs",
+    resetEveryMonths: 2,
+  },
+
   // How many days back to keep listings
   maxAgeDays: 30,
 };

@@ -10,7 +10,9 @@ Every day at ~8 AM Cairo time:
 3. Excludes Junior, Lead, Principal, Frontend, DevOps, etc.
 4. Keeps only remote-friendly locations (rejects US-only, etc.)
 5. Tags Egypt / GCC / MENA jobs as ⭐ PRIORITY
-6. Adds **new** jobs to your Google Sheet (skips ones already there)
+6. Adds **new** jobs to separate **Backend Jobs** and **Product Jobs** tabs
+7. Highlights priority rows in green
+8. Clears job rows automatically every two months (headers stay in place)
 
 You open the Sheet on your phone, sort by Date Found, and apply to the new ones.
 
@@ -22,7 +24,8 @@ You open the Sheet on your phone, sort by Date Found, and apply to the new ones.
 
 1. Go to https://sheets.google.com and create a new blank spreadsheet
 2. Name it whatever you want (e.g. "Job Tracker")
-3. Rename the first tab from "Sheet1" to **`Jobs`** (right-click the tab → Rename)
+3. Rename the first tab from "Sheet1" to **`Jobs`** (the tracker migrates it
+   to **`Backend Jobs`** and creates **`Product Jobs`** automatically)
 4. Copy the Sheet ID from the URL:
    - URL looks like: `https://docs.google.com/spreadsheets/d/`**`1AbCdEf...XYZ`**`/edit`
    - The long string between `/d/` and `/edit` is your Sheet ID
@@ -115,6 +118,7 @@ Open `src/config.js`. You can edit:
 - **`excludeTitleKeywords`** — words that disqualify a job (Junior, Frontend, etc.)
 - **`remoteFriendlyPatterns`** — locations that pass
 - **`priorityLocationPatterns`** — locations that get the ⭐ tag
+- **`spreadsheet`** — tab names and the automatic reset interval
 
 After editing, commit the change. The next run picks it up.
 

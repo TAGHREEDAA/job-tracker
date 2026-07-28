@@ -10,7 +10,7 @@ import { fetchWorkingNomads } from "./sources/workingnomads.js";
 import { fetchJobspresso } from "./sources/jobspresso.js";
 import { fetchProductJobsAnywhere } from "./sources/productjobsanywhere.js";
 import { filterJobs } from "./filter.js";
-import { writeJobsToSheet } from "./sheets.js";
+import { writeJobsToSheets } from "./sheets.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -61,7 +61,7 @@ async function main() {
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEET_ID env var is missing");
   }
-  await writeJobsToSheet(filtered, spreadsheetId);
+  await writeJobsToSheets(filtered, spreadsheetId);
 }
 
 main().catch((err) => {
