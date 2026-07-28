@@ -4,13 +4,23 @@ export const CONFIG = {
   // Job titles MUST contain at least one of these keywords (case-insensitive).
   titleKeywords: [
     "php",
+    "PHP",
+    "Laravel",
     "laravel",
     "backend",
+    "Backend",
     "back-end",
+    "Back-end",
     "back end",
+    "Back end",
     "full stack",
     "fullstack",
     "full-stack",
+    "Full stack",
+    "Fullstack",
+    "Full-stack",
+    "product",
+    "Product",
   ],
 
   // Title must NOT contain any of these (case-insensitive).
