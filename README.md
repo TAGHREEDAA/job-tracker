@@ -1,166 +1,213 @@
-# Job Tracker — Senior PHP/Laravel Remote Roles
+# Remote Backend and Product Job Tracker
 
-Daily-running tracker that pulls Senior PHP / Laravel / Backend / Full-stack remote jobs from 4 sources, filters them, and writes new ones to a Google Sheet. Runs automatically every morning on GitHub Actions (free).
+A daily job tracker for senior PHP, Laravel, backend, full-stack, and product
+roles. It collects remote listings from several job boards, filters them for
+remote-friendly locations, and writes new matches to organized tabs in one
+Google spreadsheet.
+
+The tracker runs automatically through GitHub Actions at 06:00 UTC, which is
+08:00 or 09:00 in Cairo depending on daylight-saving time.
 
 ## What it does
 
-Every day at ~8 AM Cairo time:
-1. Fetches jobs from **RemoteOK**, **WeWorkRemotely**, **Larajobs**, and **Laravel.io**
-2. Keeps only PHP / Laravel / Backend / Full-stack roles
-3. Excludes Junior, Lead, Principal, Frontend, DevOps, etc.
-4. Keeps only remote-friendly locations (rejects US-only, etc.)
-5. Tags Egypt / GCC / MENA jobs as ⭐ PRIORITY
-6. Adds **new** jobs to separate **Backend Jobs** and **Product Jobs** tabs
-7. Highlights priority rows in green
-8. Clears job rows automatically every two months (headers stay in place)
+On every run, the tracker:
 
-You open the Sheet on your phone, sort by Date Found, and apply to the new ones.
+1. Fetches listings from RemoteOK, We Work Remotely, Larajobs, Remotive,
+   Working Nomads, Jobspresso, and Product Jobs Anywhere.
+2. Keeps titles matching the configured PHP, Laravel, backend, full-stack, or
+   product keywords.
+3. Excludes junior, management, frontend, mobile, DevOps, data, and other
+   unwanted roles.
+4. Keeps remote-friendly locations such as worldwide, EMEA, Europe, MENA,
+   GCC, and Africa.
+5. Marks Egypt, Cairo, GCC, and MENA-related listings as `⭐ PRIORITY`.
+6. Skips jobs whose URL already exists in the destination tab.
+7. Writes backend roles and product roles to separate spreadsheet tabs.
 
----
+One failing source does not stop the remaining sources from running.
 
-## Setup — 30 to 45 minutes, one time
+## Spreadsheet organization
 
-### Step 1: Create the Google Sheet (2 min)
+The tracker manages two visible tabs:
 
-1. Go to https://sheets.google.com and create a new blank spreadsheet
-2. Name it whatever you want (e.g. "Job Tracker")
-3. Rename the first tab from "Sheet1" to **`Jobs`** (the tracker migrates it
-   to **`Backend Jobs`** and creates **`Product Jobs`** automatically)
-4. Copy the Sheet ID from the URL:
-   - URL looks like: `https://docs.google.com/spreadsheets/d/`**`1AbCdEf...XYZ`**`/edit`
-   - The long string between `/d/` and `/edit` is your Sheet ID
-   - Save it — you'll need it in Step 4
+- **Backend Jobs** — PHP, Laravel, backend, and full-stack matches whose title
+  does not contain `product`.
+- **Product Jobs** — matches whose title contains `product`.
 
-### Step 2: Create a Google Cloud service account (10 min, free)
+Each tab has these columns:
 
-This gives the script permission to write to your Sheet without you logging in every day.
+| Column | Purpose |
+| --- | --- |
+| Date Found | Date the tracker first added the job |
+| Priority | `⭐ PRIORITY` for preferred locations |
+| Title | Job title |
+| Company | Hiring company |
+| Location | Remote eligibility or region |
+| Salary | Salary when supplied by the source |
+| Source | Job board name |
+| URL | Application link and duplicate key |
+| Tags | Source-provided tags |
+| Date Posted | Original posting date when available |
+| Status | Manual tracking, such as Applied or Interview |
+| Notes | Manual notes |
 
-1. Go to https://console.cloud.google.com/
-2. Top-left: click the project dropdown → **New Project** → name it "job-tracker" → Create
-3. Wait ~30 seconds, then make sure the new project is selected
-4. Search bar at the top: search "**Google Sheets API**" → click it → click **Enable**
-5. Search bar again: search "**Service Accounts**" (under IAM & Admin)
-6. Click **+ CREATE SERVICE ACCOUNT**
-   - Name: `job-tracker-bot`
-   - Click **Create and Continue** → **Continue** (skip role) → **Done**
-7. You'll see your new service account in the list. Click on it.
-8. Go to **Keys** tab → **Add Key** → **Create new key** → **JSON** → **Create**
-9. A JSON file downloads. **Keep this file safe** — we'll use its content soon.
-10. **Important:** Open the JSON file in a text editor. Find the `client_email` line. Copy that email (looks like `job-tracker-bot@your-project.iam.gserviceaccount.com`)
+Rows marked `⭐ PRIORITY` are automatically highlighted in green.
 
-### Step 3: Share your Sheet with the service account (1 min)
+### Existing spreadsheet migration
 
-1. Open your Google Sheet
-2. Click **Share** (top right)
-3. Paste the `client_email` you copied above
-4. Set permission to **Editor**
-5. **Uncheck** "Notify people" (the bot doesn't read email)
-6. Click **Share**
+If the spreadsheet still has the original **Jobs** tab, the next real run:
 
-### Step 4: Set up the GitHub repo (10 min)
+1. Renames it to **Backend Jobs**.
+2. Creates **Product Jobs**.
+3. Moves existing rows whose title contains `product` to **Product Jobs**.
+4. Preserves existing Status and Notes values during the move.
 
-1. Go to https://github.com/new
-2. Repository name: `job-tracker`
-3. **Private** is fine (Actions still free)
-4. Click **Create repository**
-5. On the next page, click **uploading an existing file**
-6. Drag the entire contents of this folder into the upload area:
-   - `package.json`
-   - `.github/workflows/daily.yml`
-   - `src/` folder with everything inside
-   - This `README.md`
-7. Scroll down, click **Commit changes**
+The tracker also creates a hidden **_JobTracker** tab to store the last reset
+date.
 
-### Step 5: Add your secrets to GitHub (5 min)
+### Automatic reset
 
-GitHub Secrets are encrypted env vars that your workflow can use.
+The first real run starts the reset timer. Every two calendar months, the
+tracker clears all job rows from **Backend Jobs** and **Product Jobs**, keeps
+their headers and formatting, and then adds the current matches.
 
-1. In your repo, go to **Settings** → **Secrets and variables** → **Actions**
-2. Click **New repository secret**
-3. Add the first secret:
-   - Name: `GOOGLE_SHEET_ID`
-   - Value: the Sheet ID from Step 1
-   - Click **Add secret**
-4. Click **New repository secret** again
-5. Add the second secret:
-   - Name: `GOOGLE_SERVICE_ACCOUNT_JSON`
-   - Value: **the entire contents of the JSON file from Step 2** (open it in a text editor, select all, copy, paste)
-   - Click **Add secret**
+The reset also removes manually entered Status and Notes values from old rows.
+Other tabs in the spreadsheet are not changed.
 
-### Step 6: Test it (2 min)
+## Setup
 
-1. In your repo, go to the **Actions** tab
-2. Click **Daily Job Tracker** in the left sidebar
-3. Click **Run workflow** → **Run workflow** (the green button)
-4. Wait ~1-2 minutes. Refresh. You should see a green checkmark.
-5. Open your Google Sheet — there should be a header row plus new jobs.
+### 1. Create the Google spreadsheet
 
-✅ If you see jobs in the Sheet, you're done. It will now run every day automatically.
+1. Create a blank spreadsheet at [Google Sheets](https://sheets.google.com).
+2. Rename the first tab to **Jobs**.
+3. Copy the spreadsheet ID from its URL. It is the value between `/d/` and
+   `/edit`:
 
----
+   ```text
+   https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit
+   ```
 
-## Daily routine
+The first run will create and migrate the required tabs automatically.
 
-1. Morning: open the Google Sheet on your phone
-2. Sort by **Date Found** (column A) descending
-3. Look at today's rows. ⭐ PRIORITY ones first.
-4. For each interesting one: open the URL, apply.
-5. Set **Status** column to "Applied" / "Skipped" / "Rejected" / "Interview"
-6. Add **Notes** if useful (e.g. "Recruiter said come back in 3 months")
+### 2. Create a Google Cloud service account
 
----
+1. Create or select a project in
+   [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable the **Google Sheets API**.
+3. Open **IAM & Admin → Service Accounts**.
+4. Create a service account such as `job-tracker-bot`.
+5. Open its **Keys** tab and create a JSON key.
+6. Keep the downloaded JSON file private.
 
-## Tuning the filter
+### 3. Share the spreadsheet
 
-Open `src/config.js`. You can edit:
+Find `client_email` in the service-account JSON file, then share the
+spreadsheet with that email as an **Editor**.
 
-- **`titleKeywords`** — words that MUST appear in the title (PHP, Laravel, etc.)
-- **`excludeTitleKeywords`** — words that disqualify a job (Junior, Frontend, etc.)
-- **`remoteFriendlyPatterns`** — locations that pass
-- **`priorityLocationPatterns`** — locations that get the ⭐ tag
-- **`spreadsheet`** — tab names and the automatic reset interval
+### 4. Configure GitHub Actions secrets
 
-After editing, commit the change. The next run picks it up.
+In the repository, open **Settings → Secrets and variables → Actions** and
+create:
 
----
+- `GOOGLE_SHEET_ID` — the spreadsheet ID.
+- `GOOGLE_SERVICE_ACCOUNT_JSON` — the complete service-account JSON content.
 
-## Adding more sources later
+Never commit the service-account JSON file to the repository.
 
-Want to add another job board? Create a new file in `src/sources/` (copy `remoteok.js` as a template). Export a function. Import it in `src/index.js`. Done.
+### 5. Run the tracker
 
-Good additions later:
-- Greenhouse careers pages of specific target companies (Spatie, Automattic, etc.)
-- Lever-based companies
-- Specific Greenhouse boards (e.g. `https://boards.greenhouse.io/{company}.json` is a free JSON endpoint)
+Open **Actions → Daily Job Tracker → Run workflow**. After the run completes,
+the spreadsheet should contain the **Backend Jobs** and **Product Jobs** tabs.
 
----
+The workflow will continue running automatically every day.
 
-## Troubleshooting
+## Daily workflow
 
-**Workflow fails with "GOOGLE_SHEET_ID env var is missing"**
-→ You haven't added the secret. Repeat Step 5.
+1. Open either job tab.
+2. Review the green priority rows first.
+3. Open the URL and apply.
+4. Update **Status** with values such as `Applied`, `Skipped`, `Rejected`, or
+   `Interview`.
+5. Add any useful details under **Notes**.
 
-**Workflow fails with "Permission denied" on the Sheet**
-→ You forgot to share the Sheet with the service account email. Repeat Step 3.
+## Configuration
 
-**Some sources return 0 jobs**
-→ Check the workflow logs. The site may have changed its HTML. Source files are independent — one breaking doesn't stop the others.
+All tracker settings are in `src/config.js`:
 
-**Too many irrelevant jobs**
-→ Tighten the filter in `src/config.js`. Add more keywords to `excludeTitleKeywords`.
+- `titleKeywords` — a title must contain at least one of these values.
+- `excludeTitleKeywords` — a matching value rejects the title.
+- `remoteFriendlyPatterns` — location patterns accepted by the tracker.
+- `hardRejectLocationPatterns` — explicitly rejected location-only patterns.
+- `priorityLocationPatterns` — patterns that add the priority marker.
+- `sources` — enables or disables each job source.
+- `spreadsheet.backendSheetName` — backend tab name.
+- `spreadsheet.productSheetName` — product tab name.
+- `spreadsheet.resetEveryMonths` — automatic reset interval.
+- `maxAgeDays` — maximum listing age.
 
-**Too few jobs**
-→ Loosen the filter. Remove `lead engineer` / `principal` from exclusions if you're open to those.
+After changing configuration, commit and push the file. The next workflow run
+will use the new settings.
 
----
+## Run locally
 
-## Run locally first to test (optional)
-
-If you have Node.js installed on your computer:
+Requires Node.js 20 or newer.
 
 ```bash
 npm install
-node src/index.js --dry-run
+npm test
 ```
 
-The `--dry-run` flag prints sample matches without writing to the Sheet.
+`npm test` runs the tracker in dry-run mode. It fetches and filters live jobs
+but does not modify the spreadsheet.
+
+To perform a real local write, provide the same environment variables used by
+GitHub Actions and run:
+
+```bash
+npm start
+```
+
+## Adding another source
+
+1. Add a source adapter under `src/sources/`.
+2. Export its fetch function.
+3. Add an enabled entry under `CONFIG.sources`.
+4. Import and execute it from `src/index.js`.
+5. Return jobs using the existing normalized job structure.
+
+Source failures should be caught inside the adapter and return an empty array
+so other sources continue running.
+
+## Troubleshooting
+
+### `GOOGLE_SHEET_ID env var is missing`
+
+Add the `GOOGLE_SHEET_ID` Actions secret.
+
+### `GOOGLE_SERVICE_ACCOUNT_JSON env var is missing`
+
+Add the complete service-account JSON as an Actions secret.
+
+### Permission denied when accessing the spreadsheet
+
+Share the spreadsheet with the service account's `client_email` as an Editor.
+
+### A source returns zero jobs
+
+Review the workflow logs. A feed may be empty or its HTML structure may have
+changed. Other sources will continue running.
+
+### Too many irrelevant jobs
+
+Add unwanted terms to `excludeTitleKeywords` or tighten the accepted location
+patterns.
+
+### Too few jobs
+
+Add relevant terms to `titleKeywords`, loosen the location patterns, or
+increase `maxAgeDays`.
+
+### A job appears on the wrong tab
+
+Tab assignment is title-based: titles containing `product` go to **Product
+Jobs**; all other accepted titles go to **Backend Jobs**.
