@@ -9,50 +9,133 @@ import { fetchRemotive } from "./sources/remotive.js";
 import { fetchWorkingNomads } from "./sources/workingnomads.js";
 import { fetchJobspresso } from "./sources/jobspresso.js";
 import { fetchProductJobsAnywhere } from "./sources/productjobsanywhere.js";
-import { filterJobs } from "./filter.js";
+import { evaluateJobs } from "./filter.js";
 import { writeJobsToSheets } from "./sheets.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
 async function runSource(name, enabled, fn) {
-  if (!enabled) return [];
+  if (!enabled) {
+    return {
+      jobs: [],
+      health: {
+        source: name,
+        enabled: false,
+        status: "Disabled",
+        count: 0,
+        message: "Source is disabled in configuration",
+      },
+    };
+  }
+
   console.log(`Fetching ${name}...`);
-  const jobs = await fn();
-  console.log(`  → ${jobs.length} raw`);
-  return jobs;
+  const startedAt = Date.now();
+  try {
+    const jobs = await fn();
+    const durationMs = Date.now() - startedAt;
+    const status = jobs.length ? "Healthy" : "Warning";
+    const message = jobs.length
+      ? `Fetched in ${durationMs} ms`
+      : "Source returned zero jobs; inspect workflow logs";
+    console.log(`  → ${jobs.length} raw`);
+    return {
+      jobs,
+      health: {
+        source: name,
+        enabled: true,
+        status,
+        count: jobs.length,
+        message,
+      },
+    };
+  } catch (error) {
+    console.error(`[${name}] fetch failed:`, error.message);
+    return {
+      jobs: [],
+      health: {
+        source: name,
+        enabled: true,
+        status: "Warning",
+        count: 0,
+        message: error.message,
+      },
+    };
+  }
 }
 
 async function main() {
   console.log(`=== Job Tracker — ${new Date().toISOString()} ===`);
   if (DRY_RUN) console.log("[DRY RUN — no sheet writes]");
 
-  const all = [];
-
-  all.push(...(await runSource("RemoteOK", CONFIG.sources.remoteok.enabled, fetchRemoteOK)));
-  all.push(...(await runSource("WeWorkRemotely", CONFIG.sources.weworkremotely.enabled, fetchWeWorkRemotely)));
-  all.push(...(await runSource("Larajobs", CONFIG.sources.larajobs.enabled, fetchLarajobs)));
-  all.push(...(await runSource("Laravel.io", CONFIG.sources.laravelio.enabled, fetchLaravelIO)));
-  all.push(...(await runSource("Remotive", CONFIG.sources.remotive.enabled, fetchRemotive)));
-  all.push(...(await runSource("WorkingNomads", CONFIG.sources.workingnomads.enabled, fetchWorkingNomads)));
-  all.push(...(await runSource("Jobspresso", CONFIG.sources.jobspresso.enabled, fetchJobspresso)));
-  all.push(...(await runSource("Product Jobs Anywhere", CONFIG.sources.productjobsanywhere.enabled, fetchProductJobsAnywhere)));
+  const sourceDefinitions = [
+    ["RemoteOK", CONFIG.sources.remoteok.enabled, fetchRemoteOK],
+    [
+      "WeWorkRemotely",
+      CONFIG.sources.weworkremotely.enabled,
+      fetchWeWorkRemotely,
+    ],
+    ["Larajobs", CONFIG.sources.larajobs.enabled, fetchLarajobs],
+    [
+      "Laravel.io",
+      CONFIG.sources.laravelio.enabled,
+      fetchLaravelIO,
+    ],
+    ["Remotive", CONFIG.sources.remotive.enabled, fetchRemotive],
+    [
+      "WorkingNomads",
+      CONFIG.sources.workingnomads.enabled,
+      fetchWorkingNomads,
+    ],
+    [
+      "Jobspresso",
+      CONFIG.sources.jobspresso.enabled,
+      fetchJobspresso,
+    ],
+    [
+      "Product Jobs Anywhere",
+      CONFIG.sources.productjobsanywhere.enabled,
+      fetchProductJobsAnywhere,
+    ],
+  ];
+  const sourceResults = await Promise.all(
+    sourceDefinitions.map(([name, enabled, fn]) =>
+      runSource(name, enabled, fn)
+    )
+  );
+  const all = sourceResults.flatMap((result) => result.jobs);
+  const sourceHealth = sourceResults.map((result) => result.health);
 
   console.log(`Total raw jobs: ${all.length}`);
-  const filtered = filterJobs(all);
-  console.log(`After filtering: ${filtered.length}`);
-
-  // Sort: priority first, then by source
-  filtered.sort((a, b) => {
-    if (a.priority && !b.priority) return -1;
-    if (!a.priority && b.priority) return 1;
-    return (a.source || "").localeCompare(b.source || "");
-  });
+  const results = evaluateJobs(all);
+  console.log(
+    `Recommendations: ${results.accepted.length} accepted, ` +
+      `${results.stretch.length} stretch, ${results.rejected.length} rejected`
+  );
+  console.log(
+    `Cross-source duplicates removed: ${results.duplicateCount}`
+  );
 
   if (DRY_RUN) {
-    console.log("\n=== Sample filtered jobs ===");
-    for (const j of filtered.slice(0, 10)) {
-      console.log(`[${j.priority || "  "}] ${j.source}: ${j.title} @ ${j.company} (${j.location})`);
-      console.log(`    ${j.url}`);
+    console.log("\n=== Daily shortlist preview ===");
+    const shortlist = results.accepted.slice(
+      0,
+      CONFIG.matching.dailyShortlistLimit
+    );
+    for (const job of shortlist) {
+      console.log(
+        `[${job.fitScore}] ${job.recommendation}: ${job.title} @ ` +
+          `${job.company} (${job.eligibility})`
+      );
+      console.log(`    ${job.matchReasons}`);
+      if (job.gaps) console.log(`    Gaps: ${job.gaps}`);
+      console.log(`    ${job.url}`);
+    }
+    console.log("\n=== Source health ===");
+    for (const health of sourceHealth) {
+      console.log(
+        `${health.source}: ${health.status} (${health.count}) - ` +
+          health.message
+      );
     }
     return;
   }
@@ -61,7 +144,7 @@ async function main() {
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEET_ID env var is missing");
   }
-  await writeJobsToSheets(filtered, spreadsheetId);
+  await writeJobsToSheets(results, sourceHealth, spreadsheetId);
 }
 
 main().catch((err) => {

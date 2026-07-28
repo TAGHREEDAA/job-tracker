@@ -1,9 +1,9 @@
 # Remote Backend and Product Job Tracker
 
-A daily job tracker for senior PHP, Laravel, backend, full-stack, and product
-roles. It collects remote listings from several job boards, filters them for
-remote-friendly locations, and writes new matches to organized tabs in one
-Google spreadsheet.
+A daily recommendation system for senior PHP, Laravel, backend, full-stack,
+and product-engineering roles. It collects remote listings, evaluates whether
+they can hire someone in Egypt, scores them against a resume-derived profile,
+and writes explainable recommendations to one Google spreadsheet.
 
 The tracker runs automatically through GitHub Actions at 06:00 UTC, which is
 08:00 or 09:00 in Cairo depending on daylight-saving time.
@@ -14,32 +14,47 @@ On every run, the tracker:
 
 1. Fetches listings from RemoteOK, We Work Remotely, Larajobs, Remotive,
    Working Nomads, Jobspresso, and Product Jobs Anywhere.
-2. Keeps titles matching the configured PHP, Laravel, backend, full-stack, or
-   product keywords.
-3. Excludes junior, management, frontend, mobile, DevOps, data, and other
-   unwanted roles.
-4. Keeps remote-friendly locations such as worldwide, EMEA, Europe, MENA,
-   GCC, and Africa.
-5. Marks Egypt, Cairo, GCC, and MENA-related listings as `⭐ PRIORITY`.
-6. Skips jobs whose URL already exists in the destination tab.
-7. Writes backend roles and product roles to separate spreadsheet tabs.
+2. Classifies roles as Laravel/PHP Backend, Backend, Product Engineer,
+   backend-focused Full-Stack, Stretch, or Rejected.
+3. Separates remote work from actual Egypt hiring eligibility.
+4. Extracts stack, domain, product-ownership, and employment signals from the
+   description text already supplied by each source.
+5. Produces a 0-100 fit score with match reasons, gaps, and confidence.
+6. Detects duplicates across sources using normalized company and title,
+   preferring direct ATS application links.
+7. Creates a ranked daily shortlist and separate active, stretch, rejected,
+   archive, and source-health views.
 
 One failing source does not stop the remaining sources from running.
 
 ## Spreadsheet organization
 
-The tracker manages two visible tabs:
+The tracker manages these tabs:
 
-- **Backend Jobs** — PHP, Laravel, backend, and full-stack matches whose title
-  does not contain `product`.
-- **Product Jobs** — matches whose title contains `product`.
+- **Today** — the ten highest-scoring current recommendations.
+- **Backend Jobs** — active PHP, Laravel, backend, and backend-focused
+  full-stack matches.
+- **Product Jobs** — active Product Engineer and Software Engineer, Product
+  matches.
+- **Stretch Roles** — hands-on Lead, Staff, Principal, and architecture roles
+  that meet the minimum review score.
+- **Rejected Jobs** — rejected roles and reasons, retained for 30 days.
+- **Archived Jobs** — jobs moved out of active views every two months,
+  including Status and Notes.
+- **Source Health** — current count, warning streak, and status for each
+  source.
+- **_JobTracker** — hidden maintenance metadata.
 
-Each tab has these columns:
+Recommendation tabs use these columns:
 
 | Column | Purpose |
 | --- | --- |
 | Date Found | Date the tracker first added the job |
+| Recommendation | Apply Today, Strong Match, Manual Review, Stretch, or Reject |
+| Score | Explainable resume-fit score from 0 to 100 |
 | Priority | `⭐ PRIORITY` for preferred locations |
+| Role Category | Deterministic target-role classification |
+| Eligibility | Egypt hiring eligibility decision |
 | Title | Job title |
 | Company | Hiring company |
 | Location | Remote eligibility or region |
@@ -48,10 +63,16 @@ Each tab has these columns:
 | URL | Application link and duplicate key |
 | Tags | Source-provided tags |
 | Date Posted | Original posting date when available |
+| Match Reasons | Positive evidence used by the scorer |
+| Gaps | Missing information and rejection/review reasons |
+| Confidence | High, Medium, or Low based on available description data |
+| Dedupe Key | Normalized cross-source identity |
 | Status | Manual tracking, such as Applied or Interview |
 | Notes | Manual notes |
 
 Rows marked `⭐ PRIORITY` are automatically highlighted in green.
+Status and Notes entered in **Today** are synchronized back to the matching
+active Backend or Product row before the daily shortlist is refreshed.
 
 ### Existing spreadsheet migration
 
@@ -59,20 +80,22 @@ If the spreadsheet still has the original **Jobs** tab, the next real run:
 
 1. Renames it to **Backend Jobs**.
 2. Creates **Product Jobs**.
-3. Moves existing rows whose title contains `product` to **Product Jobs**.
-4. Preserves existing Status and Notes values during the move.
+3. Upgrades the original 12-column schema to the recommendation schema.
+4. Moves existing Product Engineer rows to **Product Jobs**.
+5. Preserves existing Status and Notes values.
 
-The tracker also creates a hidden **_JobTracker** tab to store the last reset
-date.
+If a sheet contains an unknown header, the tracker stops rather than
+overwriting user data.
 
-### Automatic reset
+### Automatic archive
 
-The first real run starts the reset timer. Every two calendar months, the
-tracker clears all job rows from **Backend Jobs** and **Product Jobs**, keeps
-their headers and formatting, and then adds the current matches.
+The first real run starts the archive timer. Every two calendar months, active
+Backend, Product, and Stretch rows move to **Archived Jobs**. Headers,
+formatting, Status, and Notes are preserved. Current recommendations are then
+added back to the active views.
 
-The reset also removes manually entered Status and Notes values from old rows.
-Other tabs in the spreadsheet are not changed.
+Rejected jobs are retained for 30 days. Archived jobs do not block a genuinely
+reposted role from appearing again.
 
 ## Setup
 
@@ -117,33 +140,38 @@ Never commit the service-account JSON file to the repository.
 ### 5. Run the tracker
 
 Open **Actions → Daily Job Tracker → Run workflow**. After the run completes,
-the spreadsheet should contain the **Backend Jobs** and **Product Jobs** tabs.
+the spreadsheet should contain the recommendation tabs listed above.
 
 The workflow will continue running automatically every day.
 
 ## Daily workflow
 
-1. Open either job tab.
-2. Review the green priority rows first.
-3. Open the URL and apply.
-4. Update **Status** with values such as `Applied`, `Skipped`, `Rejected`, or
+1. Open **Today**.
+2. Review the score, eligibility, reasons, and gaps.
+3. Review green priority rows first.
+4. Open the URL and apply.
+5. Update **Status** with values such as `Applied`, `Skipped`, `Rejected`, or
    `Interview`.
-5. Add any useful details under **Notes**.
+6. Add any useful details under **Notes**.
 
 ## Configuration
 
-All tracker settings are in `src/config.js`:
+Tracker settings are in `src/config.js`:
 
-- `titleKeywords` — a title must contain at least one of these values.
-- `excludeTitleKeywords` — a matching value rejects the title.
-- `remoteFriendlyPatterns` — location patterns accepted by the tracker.
-- `hardRejectLocationPatterns` — explicitly rejected location-only patterns.
-- `priorityLocationPatterns` — patterns that add the priority marker.
-- `sources` — enables or disables each job source.
-- `spreadsheet.backendSheetName` — backend tab name.
-- `spreadsheet.productSheetName` — product tab name.
-- `spreadsheet.resetEveryMonths` — automatic reset interval.
-- `maxAgeDays` — maximum listing age.
+- `sources` enables or disables each source.
+- `spreadsheet` controls tab names, archive cadence, and rejected-job
+  retention.
+- `matching.dailyShortlistLimit` controls the Today view size.
+- `matching.recommendations` controls score thresholds.
+- `matching.strongSkills` contains primary resume-fit technologies.
+- `matching.transferableSkills` contains acceptable adjacent technologies.
+- `matching.preferredDomains` contains preferred product domains.
+- `matching.productOwnershipSignals` contains product-engineering evidence.
+- `matching.sourcePreference` breaks cross-source duplicate ties.
+- `maxAgeDays` controls listing freshness.
+
+Role-family and Egypt-eligibility rules live in `src/filter.js`, next to the
+scoring logic and human-readable reasons.
 
 After changing configuration, commit and push the file. The next workflow run
 will use the new settings.
@@ -157,8 +185,12 @@ npm install
 npm test
 ```
 
-`npm test` runs the tracker in dry-run mode. It fetches and filters live jobs
-but does not modify the spreadsheet.
+`npm test` runs deterministic unit tests followed by a live-source dry-run. It
+does not modify the spreadsheet. Run only the deterministic suite with:
+
+```bash
+npm run test:unit
+```
 
 To perform a real local write, provide the same environment variables used by
 GitHub Actions and run:
@@ -199,15 +231,22 @@ changed. Other sources will continue running.
 
 ### Too many irrelevant jobs
 
-Add unwanted terms to `excludeTitleKeywords` or tighten the accepted location
-patterns.
+Add a role or location rule in `src/filter.js`, or adjust the score thresholds
+and resume signals in `src/config.js`.
 
 ### Too few jobs
 
-Add relevant terms to `titleKeywords`, loosen the location patterns, or
-increase `maxAgeDays`.
+Adjust the role or eligibility rules, lower the review threshold, add relevant
+resume signals, or increase `maxAgeDays`.
 
 ### A job appears on the wrong tab
 
-Tab assignment is title-based: titles containing `product` go to **Product
-Jobs**; all other accepted titles go to **Backend Jobs**.
+Inspect **Role Category**, **Match Reasons**, and **Gaps**. Product placement
+uses explicit Product Engineer title patterns; other accepted engineering
+roles go to Backend Jobs.
+
+### A source repeatedly returns zero jobs
+
+Check **Source Health**. One empty run is a warning; three consecutive warnings
+mark the source unhealthy. The workflow log contains source-specific parser
+errors when available.

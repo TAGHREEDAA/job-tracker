@@ -1,16 +1,54 @@
-// Writes jobs to separate Backend Jobs and Product Jobs tabs.
-// Existing URLs are skipped, priority rows are highlighted by conditional
-// formatting, and managed job data is cleared every configured reset period.
+// Google Sheets persistence for active recommendations, daily shortlist,
+// stretch/rejected views, archival retention, and source health.
 
 import { google } from "googleapis";
 import { CONFIG } from "./config.js";
+import {
+  classifyRole,
+  createDedupeKey,
+} from "./filter.js";
 
 const LEGACY_SHEET_NAME = "Jobs";
 const METADATA_SHEET_NAME = "_JobTracker";
 const RESET_DATE_CELL = "B1";
-const PRIORITY_FORMULA = '=$B2="⭐ PRIORITY"';
+const PRIORITY_FORMULA = '=$D2="⭐ PRIORITY"';
 
-const HEADER_ROW = [
+export const ACTIVE_HEADER = [
+  "Date Found",
+  "Recommendation",
+  "Score",
+  "Priority",
+  "Role Category",
+  "Eligibility",
+  "Title",
+  "Company",
+  "Location",
+  "Salary",
+  "Source",
+  "URL",
+  "Tags",
+  "Date Posted",
+  "Match Reasons",
+  "Gaps",
+  "Confidence",
+  "Dedupe Key",
+  "Status",
+  "Notes",
+];
+
+const ARCHIVE_HEADER = [...ACTIVE_HEADER, "Archived Date"];
+
+const SOURCE_HEALTH_HEADER = [
+  "Checked At",
+  "Source",
+  "Enabled",
+  "Status",
+  "Jobs Found",
+  "Consecutive Warnings",
+  "Message",
+];
+
+const OLD_HEADER = [
   "Date Found",
   "Priority",
   "Title",
@@ -30,11 +68,11 @@ function buildAuth() {
   if (!credsJson) {
     throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON env var is missing");
   }
-  const creds = JSON.parse(credsJson);
+  const credentials = JSON.parse(credsJson);
   return new google.auth.JWT(
-    creds.client_email,
+    credentials.client_email,
     null,
-    creds.private_key,
+    credentials.private_key,
     ["https://www.googleapis.com/auth/spreadsheets"]
   );
 }
@@ -44,23 +82,95 @@ function a1Range(sheetName, cells) {
   return `'${escapedName}'!${cells}`;
 }
 
-function cleanTitle(value) {
-  return (value || "").toLowerCase();
+function sameRow(left = [], right = []) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
-export function isProductJob(job) {
-  return cleanTitle(job.title).includes("product");
+function todayISO(now = new Date()) {
+  return now.toISOString().slice(0, 10);
 }
 
-export function splitJobsByTitle(jobs) {
-  const backend = [];
-  const product = [];
+function normalizedStatus(value) {
+  return (value || "").toString().trim();
+}
 
-  for (const job of jobs) {
-    (isProductJob(job) ? product : backend).push(job);
-  }
+function padRow(row, length) {
+  const copy = [...row];
+  while (copy.length < length) copy.push("");
+  return copy.slice(0, length);
+}
 
-  return { backend, product };
+export function legacyRowToActive(row) {
+  const old = padRow(row, OLD_HEADER.length);
+  const job = {
+    title: old[2],
+    company: old[3],
+    location: old[4],
+  };
+  const role = classifyRole(job);
+  return [
+    old[0],
+    "Legacy",
+    "",
+    old[1],
+    role.category,
+    "Not evaluated",
+    old[2],
+    old[3],
+    old[4],
+    old[5],
+    old[6],
+    old[7],
+    old[8],
+    old[9],
+    "Migrated from the previous spreadsheet schema",
+    "",
+    "Low",
+    createDedupeKey(job),
+    old[10],
+    old[11],
+  ];
+}
+
+export function jobToRow(job, dateFound = todayISO()) {
+  return [
+    dateFound,
+    job.recommendation || "",
+    job.fitScore ?? "",
+    job.priority || "",
+    job.roleCategory || "",
+    job.eligibility || "",
+    job.title || "",
+    job.company || "",
+    job.location || "",
+    job.salary || "",
+    job.source || "",
+    job.url || "",
+    job.tags || "",
+    job.datePosted || "",
+    job.matchReasons || "",
+    job.gaps || "",
+    job.confidence || "",
+    job.dedupeKey || createDedupeKey(job),
+    "",
+    "",
+  ];
+}
+
+function rowIdentity(row) {
+  const padded = padRow(row, ACTIVE_HEADER.length);
+  return {
+    url: padded[11],
+    dedupeKey:
+      padded[17] ||
+      createDedupeKey({
+        title: padded[6],
+        company: padded[7],
+      }),
+  };
 }
 
 function addCalendarMonths(value, months) {
@@ -92,9 +202,7 @@ export function isResetDue(
 }
 
 async function getSpreadsheetSheets(sheets, spreadsheetId) {
-  const response = await sheets.spreadsheets.get({
-    spreadsheetId,
-  });
+  const response = await sheets.spreadsheets.get({ spreadsheetId });
   return response.data.sheets || [];
 }
 
@@ -104,7 +212,7 @@ async function createSheet(
   title,
   hidden = false
 ) {
-  const response = await sheets.spreadsheets.batchUpdate({
+  await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     requestBody: {
       requests: [
@@ -116,18 +224,18 @@ async function createSheet(
       ],
     },
   });
-  return response.data.replies[0].addSheet.properties;
+  console.log(`Created "${title}" sheet.`);
 }
 
 async function renameLegacySheet(sheets, spreadsheetId, sheetList) {
   const backendName = CONFIG.spreadsheet.backendSheetName;
-  const hasBackend = sheetList.some(
+  const backendExists = sheetList.some(
     (sheet) => sheet.properties.title === backendName
   );
   const legacy = sheetList.find(
     (sheet) => sheet.properties.title === LEGACY_SHEET_NAME
   );
-  if (!legacy || hasBackend) return false;
+  if (!legacy || backendExists) return false;
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -149,7 +257,20 @@ async function renameLegacySheet(sheets, spreadsheetId, sheetList) {
   return true;
 }
 
-async function ensureManagedSheets(sheets, spreadsheetId) {
+function requiredSheets() {
+  return [
+    { title: CONFIG.spreadsheet.backendSheetName },
+    { title: CONFIG.spreadsheet.productSheetName },
+    { title: CONFIG.spreadsheet.todaySheetName },
+    { title: CONFIG.spreadsheet.stretchSheetName },
+    { title: CONFIG.spreadsheet.rejectedSheetName },
+    { title: CONFIG.spreadsheet.archiveSheetName },
+    { title: CONFIG.spreadsheet.sourceHealthSheetName },
+    { title: METADATA_SHEET_NAME, hidden: true },
+  ];
+}
+
+async function ensureSheets(sheets, spreadsheetId) {
   let sheetList = await getSpreadsheetSheets(sheets, spreadsheetId);
   const renamedLegacy = await renameLegacySheet(
     sheets,
@@ -160,19 +281,7 @@ async function ensureManagedSheets(sheets, spreadsheetId) {
     sheetList = await getSpreadsheetSheets(sheets, spreadsheetId);
   }
 
-  const requiredSheets = [
-    {
-      title: CONFIG.spreadsheet.backendSheetName,
-      hidden: false,
-    },
-    {
-      title: CONFIG.spreadsheet.productSheetName,
-      hidden: false,
-    },
-    { title: METADATA_SHEET_NAME, hidden: true },
-  ];
-
-  for (const required of requiredSheets) {
+  for (const required of requiredSheets()) {
     if (
       !sheetList.some(
         (sheet) => sheet.properties.title === required.title
@@ -182,7 +291,7 @@ async function ensureManagedSheets(sheets, spreadsheetId) {
         sheets,
         spreadsheetId,
         required.title,
-        required.hidden
+        required.hidden || false
       );
     }
   }
@@ -193,21 +302,112 @@ async function ensureManagedSheets(sheets, spreadsheetId) {
   };
 }
 
-async function ensureHeader(sheets, spreadsheetId, sheetName) {
+async function getRows(
+  sheets,
+  spreadsheetId,
+  sheetName,
+  columns = "A:U"
+) {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: a1Range(sheetName, "A1:L1"),
+    range: a1Range(sheetName, columns),
   });
-  const row = response.data.values?.[0];
-  if (row?.length) return;
+  return response.data.values || [];
+}
 
+async function overwriteRows(
+  sheets,
+  spreadsheetId,
+  sheetName,
+  header,
+  rows
+) {
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: a1Range(sheetName, "A:Z"),
+  });
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: a1Range(sheetName, "A1:L1"),
+    range: a1Range(sheetName, "A1"),
     valueInputOption: "RAW",
-    requestBody: { values: [HEADER_ROW] },
+    requestBody: { values: [header, ...rows] },
   });
-  console.log(`Header row written to "${sheetName}".`);
+}
+
+async function appendRows(
+  sheets,
+  spreadsheetId,
+  sheetName,
+  rows
+) {
+  if (!rows.length) return;
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: a1Range(sheetName, "A:Z"),
+    valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: rows },
+  });
+}
+
+async function ensureSchema(
+  sheets,
+  spreadsheetId,
+  sheetName,
+  header
+) {
+  const values = await getRows(
+    sheets,
+    spreadsheetId,
+    sheetName
+  );
+  if (!values.length) {
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      header,
+      []
+    );
+    return;
+  }
+  if (sameRow(values[0], header)) return;
+
+  if (
+    header === ACTIVE_HEADER &&
+    sameRow(values[0], OLD_HEADER)
+  ) {
+    const migrated = values
+      .slice(1)
+      .filter((row) => row.some(Boolean))
+      .map(legacyRowToActive);
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      ACTIVE_HEADER,
+      migrated
+    );
+    console.log(
+      `Migrated ${migrated.length} rows in "${sheetName}" to the recommendation schema.`
+    );
+    return;
+  }
+
+  if (values[0].length === 0) {
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      header,
+      values.slice(1)
+    );
+    return;
+  }
+
+  throw new Error(
+    `Unexpected header in "${sheetName}". Refusing to overwrite user data.`
+  );
 }
 
 function hasPriorityFormat(sheet) {
@@ -218,69 +418,81 @@ function hasPriorityFormat(sheet) {
   );
 }
 
-async function ensurePriorityFormatting(
-  sheets,
-  spreadsheetId,
-  sheet
-) {
-  if (hasPriorityFormat(sheet)) return;
+async function ensureFormatting(sheets, spreadsheetId, sheet) {
+  const requests = [
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId: sheet.properties.sheetId,
+          gridProperties: { frozenRowCount: 1 },
+        },
+        fields: "gridProperties.frozenRowCount",
+      },
+    },
+    {
+      repeatCell: {
+        range: {
+          sheetId: sheet.properties.sheetId,
+          startRowIndex: 0,
+          endRowIndex: 1,
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: { bold: true },
+            backgroundColor: {
+              red: 0.86,
+              green: 0.9,
+              blue: 0.97,
+            },
+          },
+        },
+        fields:
+          "userEnteredFormat(textFormat,backgroundColor)",
+      },
+    },
+  ];
 
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: [
-        {
-          addConditionalFormatRule: {
-            index: 0,
-            rule: {
-              ranges: [
-                {
-                  sheetId: sheet.properties.sheetId,
-                  startRowIndex: 1,
-                  startColumnIndex: 0,
-                  endColumnIndex: HEADER_ROW.length,
-                },
-              ],
-              booleanRule: {
-                condition: {
-                  type: "CUSTOM_FORMULA",
-                  values: [{ userEnteredValue: PRIORITY_FORMULA }],
-                },
-                format: {
-                  backgroundColor: {
-                    red: 0.85,
-                    green: 0.94,
-                    blue: 0.83,
-                  },
-                },
+  if (!hasPriorityFormat(sheet)) {
+    requests.push({
+      addConditionalFormatRule: {
+        index: 0,
+        rule: {
+          ranges: [
+            {
+              sheetId: sheet.properties.sheetId,
+              startRowIndex: 1,
+              startColumnIndex: 0,
+              endColumnIndex: ACTIVE_HEADER.length,
+            },
+          ],
+          booleanRule: {
+            condition: {
+              type: "CUSTOM_FORMULA",
+              values: [{ userEnteredValue: PRIORITY_FORMULA }],
+            },
+            format: {
+              backgroundColor: {
+                red: 0.85,
+                green: 0.94,
+                blue: 0.83,
               },
             },
           },
         },
-      ],
-    },
-  });
-}
+      },
+    });
+  }
 
-async function getExistingUrls(
-  sheets,
-  spreadsheetId,
-  sheetName
-) {
-  const response = await sheets.spreadsheets.values.get({
+  await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
-    range: a1Range(sheetName, "H2:H"),
+    requestBody: { requests },
   });
-  const urls = (response.data.values || [])
-    .map((row) => row[0])
-    .filter(Boolean);
-  return new Set(urls);
 }
 
 async function getResetDate(sheets, spreadsheetId) {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: a1Range(METADATA_SHEET_NAME, `A1:${RESET_DATE_CELL}`),
+    range: a1Range(METADATA_SHEET_NAME, "A1:B1"),
   });
   return response.data.values?.[0]?.[1] || "";
 }
@@ -288,15 +500,15 @@ async function getResetDate(sheets, spreadsheetId) {
 async function setResetDate(sheets, spreadsheetId, date) {
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: a1Range(METADATA_SHEET_NAME, `A1:${RESET_DATE_CELL}`),
+    range: a1Range(METADATA_SHEET_NAME, "A1:B1"),
     valueInputOption: "RAW",
     requestBody: {
-      values: [["Last reset", date]],
+      values: [["Last archive", date]],
     },
   });
 }
 
-async function resetManagedSheetsIfDue(
+async function archiveActiveJobsIfDue(
   sheets,
   spreadsheetId,
   today
@@ -310,36 +522,65 @@ async function resetManagedSheetsIfDue(
     return false;
   }
 
+  const archiveName = CONFIG.spreadsheet.archiveSheetName;
+  const archiveValues = await getRows(
+    sheets,
+    spreadsheetId,
+    archiveName
+  );
+  const archiveIdentities = new Set(
+    archiveValues.slice(1).map((row) => {
+      const identity = rowIdentity(row);
+      return `${identity.dedupeKey}:${row[0]}`;
+    })
+  );
+
+  let archivedCount = 0;
   for (const sheetName of [
     CONFIG.spreadsheet.backendSheetName,
     CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.stretchSheetName,
   ]) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName
+    );
+    const rows = values
+      .slice(1)
+      .filter((row) => row.some(Boolean))
+      .map((row) => padRow(row, ACTIVE_HEADER.length));
+    const newArchiveRows = rows
+      .filter((row) => {
+        const identity = rowIdentity(row);
+        return !archiveIdentities.has(
+          `${identity.dedupeKey}:${row[0]}`
+        );
+      })
+      .map((row) => [...row, today]);
+
+    await appendRows(
+      sheets,
+      spreadsheetId,
+      archiveName,
+      newArchiveRows
+    );
+    for (const row of newArchiveRows) {
+      const identity = rowIdentity(row);
+      archiveIdentities.add(`${identity.dedupeKey}:${row[0]}`);
+    }
     await sheets.spreadsheets.values.clear({
       spreadsheetId,
-      range: a1Range(sheetName, "A2:L"),
+      range: a1Range(sheetName, "A2:Z"),
     });
+    archivedCount += newArchiveRows.length;
   }
+
   await setResetDate(sheets, spreadsheetId, today);
   console.log(
-    `Cleared managed job rows after ${CONFIG.spreadsheet.resetEveryMonths} months.`
+    `Archived ${archivedCount} active rows after ${CONFIG.spreadsheet.resetEveryMonths} months.`
   );
   return true;
-}
-
-async function appendRows(
-  sheets,
-  spreadsheetId,
-  sheetName,
-  rows
-) {
-  if (!rows.length) return;
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: a1Range(sheetName, "A:L"),
-    valueInputOption: "RAW",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: rows },
-  });
 }
 
 async function migrateLegacyProductRows(
@@ -348,26 +589,38 @@ async function migrateLegacyProductRows(
 ) {
   const backendName = CONFIG.spreadsheet.backendSheetName;
   const productName = CONFIG.spreadsheet.productSheetName;
-  const response = await sheets.spreadsheets.values.get({
+  const backendValues = await getRows(
+    sheets,
     spreadsheetId,
-    range: a1Range(backendName, "A2:L"),
-  });
-  const existingRows = response.data.values || [];
-  const productRows = existingRows.filter((row) =>
-    isProductJob({ title: row[2] })
+    backendName
   );
-  if (!productRows.length) return;
-
-  const backendRows = existingRows.filter(
-    (row) => !isProductJob({ title: row[2] })
-  );
-  const productUrls = await getExistingUrls(
+  const productValues = await getRows(
     sheets,
     spreadsheetId,
     productName
   );
-  const newProductRows = productRows.filter(
-    (row) => !row[7] || !productUrls.has(row[7])
+  const productKeys = new Set(
+    productValues.slice(1).map((row) => rowIdentity(row).dedupeKey)
+  );
+  const backendRows = backendValues
+    .slice(1)
+    .filter((row) => row.some(Boolean))
+    .map((row) => padRow(row, ACTIVE_HEADER.length));
+  const rowsToMove = backendRows.filter(
+    (row) =>
+      classifyRole({ title: row[6] }).category ===
+      "Product Engineer"
+  );
+  if (!rowsToMove.length) return;
+
+  const newProductRows = rowsToMove.filter(
+    (row) => !productKeys.has(rowIdentity(row).dedupeKey)
+  );
+  const movedKeys = new Set(
+    rowsToMove.map((row) => rowIdentity(row).dedupeKey)
+  );
+  const remainingBackendRows = backendRows.filter(
+    (row) => !movedKeys.has(rowIdentity(row).dedupeKey)
   );
 
   await appendRows(
@@ -376,114 +629,425 @@ async function migrateLegacyProductRows(
     productName,
     newProductRows
   );
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId,
-    range: a1Range(backendName, "A2:L"),
-  });
-  if (backendRows.length) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: a1Range(backendName, "A2:L"),
-      valueInputOption: "RAW",
-      requestBody: { values: backendRows },
-    });
-  }
-  console.log(
-    `Moved ${productRows.length} existing product jobs to "${productName}".`
-  );
-}
-
-function jobToRow(job, today) {
-  return [
-    today,
-    job.priority || "",
-    job.title || "",
-    job.company || "",
-    job.location || "",
-    job.salary || "",
-    job.source || "",
-    job.url || "",
-    job.tags || "",
-    job.datePosted || "",
-    "",
-    "",
-  ];
-}
-
-async function writeJobGroup(
-  sheets,
-  spreadsheetId,
-  sheetName,
-  jobs,
-  today
-) {
-  const existing = await getExistingUrls(
+  await overwriteRows(
     sheets,
     spreadsheetId,
-    sheetName
+    backendName,
+    ACTIVE_HEADER,
+    remainingBackendRows
   );
-  const newRows = [];
-  let skipped = 0;
+  console.log(
+    `Moved ${rowsToMove.length} legacy product-engineering rows to "${productName}".`
+  );
+}
 
+async function activeIdentities(
+  sheets,
+  spreadsheetId,
+  sheetNames
+) {
+  const urls = new Set();
+  const dedupeKeys = new Set();
+  for (const sheetName of sheetNames) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName
+    );
+    for (const row of values.slice(1)) {
+      const identity = rowIdentity(row);
+      if (identity.url) urls.add(identity.url);
+      if (identity.dedupeKey) dedupeKeys.add(identity.dedupeKey);
+    }
+  }
+  return { urls, dedupeKeys };
+}
+
+function filterNewJobs(jobs, identities) {
+  const fresh = [];
+  let skipped = 0;
   for (const job of jobs) {
-    if (existing.has(job.url)) {
+    if (
+      identities.urls.has(job.url) ||
+      identities.dedupeKeys.has(job.dedupeKey)
+    ) {
       skipped++;
       continue;
     }
-    existing.add(job.url);
-    newRows.push(jobToRow(job, today));
+    identities.urls.add(job.url);
+    identities.dedupeKeys.add(job.dedupeKey);
+    fresh.push(job);
   }
-
-  await appendRows(sheets, spreadsheetId, sheetName, newRows);
-  console.log(
-    `"${sheetName}": added ${newRows.length}, skipped ${skipped} duplicates.`
-  );
-  return { added: newRows.length, skipped };
+  return { fresh, skipped };
 }
 
-export async function writeJobsToSheets(jobs, spreadsheetId) {
-  const auth = buildAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const setup = await ensureManagedSheets(sheets, spreadsheetId);
-  const dataSheetNames = [
+async function writeActiveJobs(
+  sheets,
+  spreadsheetId,
+  results,
+  today
+) {
+  const backendName = CONFIG.spreadsheet.backendSheetName;
+  const productName = CONFIG.spreadsheet.productSheetName;
+  const stretchName = CONFIG.spreadsheet.stretchSheetName;
+  const identities = await activeIdentities(
+    sheets,
+    spreadsheetId,
+    [backendName, productName, stretchName]
+  );
+
+  const acceptedResult = filterNewJobs(
+    results.accepted,
+    identities
+  );
+  const stretchResult = filterNewJobs(
+    results.stretch,
+    identities
+  );
+  const backendJobs = acceptedResult.fresh.filter(
+    (job) => job.roleCategory !== "Product Engineer"
+  );
+  const productJobs = acceptedResult.fresh.filter(
+    (job) => job.roleCategory === "Product Engineer"
+  );
+
+  await appendRows(
+    sheets,
+    spreadsheetId,
+    backendName,
+    backendJobs.map((job) => jobToRow(job, today))
+  );
+  await appendRows(
+    sheets,
+    spreadsheetId,
+    productName,
+    productJobs.map((job) => jobToRow(job, today))
+  );
+  await appendRows(
+    sheets,
+    spreadsheetId,
+    stretchName,
+    stretchResult.fresh.map((job) => jobToRow(job, today))
+  );
+
+  console.log(
+    `Active jobs: ${backendJobs.length} backend, ` +
+      `${productJobs.length} product, ` +
+      `${stretchResult.fresh.length} stretch; ` +
+      `${acceptedResult.skipped + stretchResult.skipped} duplicates skipped.`
+  );
+}
+
+async function syncTodayManualFields(
+  sheets,
+  spreadsheetId
+) {
+  const todayValues = await getRows(
+    sheets,
+    spreadsheetId,
+    CONFIG.spreadsheet.todaySheetName
+  );
+  const manualByIdentity = new Map();
+  for (const row of todayValues.slice(1)) {
+    const padded = padRow(row, ACTIVE_HEADER.length);
+    const status = normalizedStatus(padded[18]);
+    const notes = normalizedStatus(padded[19]);
+    if (!status && !notes) continue;
+    const identity = rowIdentity(padded);
+    if (identity.url) {
+      manualByIdentity.set(`url:${identity.url}`, {
+        status,
+        notes,
+      });
+    }
+    if (identity.dedupeKey) {
+      manualByIdentity.set(`key:${identity.dedupeKey}`, {
+        status,
+        notes,
+      });
+    }
+  }
+  if (!manualByIdentity.size) return;
+
+  for (const sheetName of [
     CONFIG.spreadsheet.backendSheetName,
     CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.stretchSheetName,
+  ]) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName
+    );
+    let changed = false;
+    const rows = values
+      .slice(1)
+      .filter((row) => row.some(Boolean))
+      .map((row) => {
+        const padded = padRow(row, ACTIVE_HEADER.length);
+        const identity = rowIdentity(padded);
+        const manual =
+          manualByIdentity.get(`url:${identity.url}`) ||
+          manualByIdentity.get(`key:${identity.dedupeKey}`);
+        if (!manual) return padded;
+        if (
+          padded[18] !== manual.status ||
+          padded[19] !== manual.notes
+        ) {
+          padded[18] = manual.status;
+          padded[19] = manual.notes;
+          changed = true;
+        }
+        return padded;
+      });
+    if (changed) {
+      await overwriteRows(
+        sheets,
+        spreadsheetId,
+        sheetName,
+        ACTIVE_HEADER,
+        rows
+      );
+    }
+  }
+}
+
+async function getActiveManualData(sheets, spreadsheetId) {
+  const manualByIdentity = new Map();
+  for (const sheetName of [
+    CONFIG.spreadsheet.backendSheetName,
+    CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.stretchSheetName,
+  ]) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName
+    );
+    for (const row of values.slice(1)) {
+      const padded = padRow(row, ACTIVE_HEADER.length);
+      const manual = {
+        dateFound: padded[0],
+        status: normalizedStatus(padded[18]),
+        notes: normalizedStatus(padded[19]),
+      };
+      const identity = rowIdentity(padded);
+      if (identity.url) {
+        manualByIdentity.set(`url:${identity.url}`, manual);
+      }
+      if (identity.dedupeKey) {
+        manualByIdentity.set(`key:${identity.dedupeKey}`, manual);
+      }
+    }
+  }
+  return manualByIdentity;
+}
+
+async function writeToday(
+  sheets,
+  spreadsheetId,
+  acceptedJobs,
+  today,
+  manualByIdentity
+) {
+  const shortlist = acceptedJobs
+    .slice(0, CONFIG.matching.dailyShortlistLimit)
+    .map((job) => {
+      const row = jobToRow(job, today);
+      const manual =
+        manualByIdentity.get(`url:${job.url}`) ||
+        manualByIdentity.get(`key:${job.dedupeKey}`);
+      if (manual) {
+        row[0] = manual.dateFound || row[0];
+        row[18] = manual.status;
+        row[19] = manual.notes;
+      }
+      return row;
+    });
+  await overwriteRows(
+    sheets,
+    spreadsheetId,
+    CONFIG.spreadsheet.todaySheetName,
+    ACTIVE_HEADER,
+    shortlist
+  );
+}
+
+export function withinRetention(dateFound, today, retentionDays) {
+  const found = new Date(`${dateFound}T00:00:00Z`);
+  const current = new Date(`${today}T00:00:00Z`);
+  if (Number.isNaN(found.getTime())) return true;
+  return (current - found) / 86_400_000 <= retentionDays;
+}
+
+async function writeRejectedJobs(
+  sheets,
+  spreadsheetId,
+  rejectedJobs,
+  today
+) {
+  const sheetName = CONFIG.spreadsheet.rejectedSheetName;
+  const values = await getRows(sheets, spreadsheetId, sheetName);
+  const retained = values
+    .slice(1)
+    .filter((row) => row.some(Boolean))
+    .map((row) => padRow(row, ACTIVE_HEADER.length))
+    .filter((row) =>
+      withinRetention(
+        row[0],
+        today,
+        CONFIG.spreadsheet.rejectedRetentionDays
+      )
+    );
+  const identities = {
+    urls: new Set(),
+    dedupeKeys: new Set(),
+  };
+  for (const row of retained) {
+    const identity = rowIdentity(row);
+    if (identity.url) identities.urls.add(identity.url);
+    if (identity.dedupeKey) {
+      identities.dedupeKeys.add(identity.dedupeKey);
+    }
+  }
+  const { fresh } = filterNewJobs(rejectedJobs, identities);
+  await overwriteRows(
+    sheets,
+    spreadsheetId,
+    sheetName,
+    ACTIVE_HEADER,
+    [
+      ...retained,
+      ...fresh.map((job) => jobToRow(job, today)),
+    ]
+  );
+}
+
+async function writeSourceHealth(
+  sheets,
+  spreadsheetId,
+  sourceHealth,
+  checkedAt
+) {
+  const sheetName = CONFIG.spreadsheet.sourceHealthSheetName;
+  const current = await getRows(sheets, spreadsheetId, sheetName);
+  const previousWarnings = new Map(
+    current.slice(1).map((row) => [
+      row[1],
+      Number.parseInt(row[5], 10) || 0,
+    ])
+  );
+  const rows = sourceHealth.map((health) => {
+    const warningCount =
+      health.status === "Healthy" || health.status === "Disabled"
+        ? 0
+        : (previousWarnings.get(health.source) || 0) + 1;
+    const status =
+      warningCount >= 3 ? "Unhealthy" : health.status;
+    return [
+      checkedAt,
+      health.source,
+      health.enabled ? "Yes" : "No",
+      status,
+      health.count,
+      warningCount,
+      health.message,
+    ];
+  });
+  await overwriteRows(
+    sheets,
+    spreadsheetId,
+    sheetName,
+    SOURCE_HEALTH_HEADER,
+    rows
+  );
+}
+
+export async function writeJobsToSheets(
+  results,
+  sourceHealth,
+  spreadsheetId
+) {
+  const auth = buildAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const setup = await ensureSheets(sheets, spreadsheetId);
+  const activeSheetNames = [
+    CONFIG.spreadsheet.backendSheetName,
+    CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.todaySheetName,
+    CONFIG.spreadsheet.stretchSheetName,
+    CONFIG.spreadsheet.rejectedSheetName,
   ];
 
-  for (const sheetName of dataSheetNames) {
-    await ensureHeader(sheets, spreadsheetId, sheetName);
+  for (const sheetName of activeSheetNames) {
+    await ensureSchema(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      ACTIVE_HEADER
+    );
   }
+  await ensureSchema(
+    sheets,
+    spreadsheetId,
+    CONFIG.spreadsheet.archiveSheetName,
+    ARCHIVE_HEADER
+  );
+  await ensureSchema(
+    sheets,
+    spreadsheetId,
+    CONFIG.spreadsheet.sourceHealthSheetName,
+    SOURCE_HEALTH_HEADER
+  );
+
   if (setup.renamedLegacy) {
     await migrateLegacyProductRows(sheets, spreadsheetId);
   }
 
-  for (const sheet of setup.sheets.filter((candidate) =>
-    dataSheetNames.includes(candidate.properties.title)
+  const currentSheets = await getSpreadsheetSheets(
+    sheets,
+    spreadsheetId
+  );
+  const formattedSheetNames = [
+    ...activeSheetNames,
+    CONFIG.spreadsheet.archiveSheetName,
+  ];
+  for (const sheet of currentSheets.filter((candidate) =>
+    formattedSheetNames.includes(candidate.properties.title)
   )) {
-    await ensurePriorityFormatting(sheets, spreadsheetId, sheet);
+    await ensureFormatting(sheets, spreadsheetId, sheet);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  await resetManagedSheetsIfDue(sheets, spreadsheetId, today);
-
-  const grouped = splitJobsByTitle(jobs);
-  const backendResult = await writeJobGroup(
+  const today = todayISO();
+  await syncTodayManualFields(sheets, spreadsheetId);
+  await archiveActiveJobsIfDue(sheets, spreadsheetId, today);
+  await writeActiveJobs(
     sheets,
     spreadsheetId,
-    CONFIG.spreadsheet.backendSheetName,
-    grouped.backend,
+    results,
     today
   );
-  const productResult = await writeJobGroup(
+  const manualByIdentity = await getActiveManualData(
+    sheets,
+    spreadsheetId
+  );
+  await writeToday(
     sheets,
     spreadsheetId,
-    CONFIG.spreadsheet.productSheetName,
-    grouped.product,
+    results.accepted,
+    today,
+    manualByIdentity
+  );
+  await writeRejectedJobs(
+    sheets,
+    spreadsheetId,
+    results.rejected,
     today
   );
-
-  return {
-    added: backendResult.added + productResult.added,
-    skipped: backendResult.skipped + productResult.skipped,
-  };
+  await writeSourceHealth(
+    sheets,
+    spreadsheetId,
+    sourceHealth,
+    new Date().toISOString()
+  );
 }
