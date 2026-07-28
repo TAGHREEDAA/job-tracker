@@ -8,6 +8,7 @@ import { fetchLaravelIO } from "./sources/laravelio.js";
 import { fetchRemotive } from "./sources/remotive.js";
 import { fetchWorkingNomads } from "./sources/workingnomads.js";
 import { fetchJobspresso } from "./sources/jobspresso.js";
+import { fetchProductJobsAnywhere } from "./sources/productjobsanywhere.js";
 import { filterJobs } from "./filter.js";
 import { writeJobsToSheet } from "./sheets.js";
 
@@ -34,6 +35,7 @@ async function main() {
   all.push(...(await runSource("Remotive", CONFIG.sources.remotive.enabled, fetchRemotive)));
   all.push(...(await runSource("WorkingNomads", CONFIG.sources.workingnomads.enabled, fetchWorkingNomads)));
   all.push(...(await runSource("Jobspresso", CONFIG.sources.jobspresso.enabled, fetchJobspresso)));
+  all.push(...(await runSource("Product Jobs Anywhere", CONFIG.sources.productjobsanywhere.enabled, fetchProductJobsAnywhere)));
 
   console.log(`Total raw jobs: ${all.length}`);
   const filtered = filterJobs(all);

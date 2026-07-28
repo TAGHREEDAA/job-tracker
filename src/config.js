@@ -109,6 +109,7 @@ export const CONFIG = {
     remotive: { enabled: true },        // NEW
     workingnomads: { enabled: true },   // NEW
     jobspresso: { enabled: true },      // NEW
+    productjobsanywhere: { enabled: true },
   },
 
   // How many days back to keep listings
