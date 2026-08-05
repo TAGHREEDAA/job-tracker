@@ -144,6 +144,18 @@ the spreadsheet should contain the recommendation tabs listed above.
 
 The workflow will continue running automatically every day.
 
+### Manual reset
+
+Use **Actions → Reset Job Tracker Sheets → Run workflow** when you want to
+clear tracker-managed content without deleting the spreadsheet or its
+headers. Type `RESET` in the confirmation field.
+
+By default, the reset clears Backend Jobs, Product Jobs, Today, Stretch Roles,
+Rejected Jobs, and Source Health while preserving Archived Jobs. Enable
+**Also delete all rows from Archived Jobs** only when you want to delete the
+archive as well. The reset and daily tracker cannot write to the spreadsheet
+at the same time.
+
 ## Daily workflow
 
 1. Open **Today**.

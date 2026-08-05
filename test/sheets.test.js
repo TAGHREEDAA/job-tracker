@@ -3,11 +3,18 @@ import test from "node:test";
 
 import {
   ACTIVE_HEADER,
+  ARCHIVE_HEADER,
+  columnsForHeader,
   isResetDue,
   jobToRow,
   legacyRowToActive,
   withinRetention,
 } from "../src/sheets.js";
+
+test("schema reads only the columns defined by each header", () => {
+  assert.equal(columnsForHeader(ACTIVE_HEADER), "A:T");
+  assert.equal(columnsForHeader(ARCHIVE_HEADER), "A:U");
+});
 
 test("two-month archive cadence handles month-end dates", () => {
   assert.equal(

@@ -36,9 +36,9 @@ export const ACTIVE_HEADER = [
   "Notes",
 ];
 
-const ARCHIVE_HEADER = [...ACTIVE_HEADER, "Archived Date"];
+export const ARCHIVE_HEADER = [...ACTIVE_HEADER, "Archived Date"];
 
-const SOURCE_HEALTH_HEADER = [
+export const SOURCE_HEALTH_HEADER = [
   "Checked At",
   "Source",
   "Enabled",
@@ -87,6 +87,21 @@ function sameRow(left = [], right = []) {
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   );
+}
+
+function columnName(columnNumber) {
+  let value = columnNumber;
+  let name = "";
+  while (value > 0) {
+    value -= 1;
+    name = String.fromCharCode(65 + (value % 26)) + name;
+    value = Math.floor(value / 26);
+  }
+  return name;
+}
+
+export function columnsForHeader(header) {
+  return `A:${columnName(header.length)}`;
 }
 
 function todayISO(now = new Date()) {
@@ -359,7 +374,8 @@ async function ensureSchema(
   const values = await getRows(
     sheets,
     spreadsheetId,
-    sheetName
+    sheetName,
+    columnsForHeader(header)
   );
   if (!values.length) {
     await overwriteRows(
@@ -1049,5 +1065,45 @@ export async function writeJobsToSheets(
     spreadsheetId,
     sourceHealth,
     new Date().toISOString()
+  );
+}
+
+export async function resetManagedSheets(
+  spreadsheetId,
+  { includeArchive = false } = {}
+) {
+  if (!spreadsheetId) {
+    throw new Error("GOOGLE_SHEET_ID env var is missing");
+  }
+
+  const auth = buildAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  await ensureSheets(sheets, spreadsheetId);
+
+  const targets = [
+    [CONFIG.spreadsheet.backendSheetName, ACTIVE_HEADER],
+    [CONFIG.spreadsheet.productSheetName, ACTIVE_HEADER],
+    [CONFIG.spreadsheet.todaySheetName, ACTIVE_HEADER],
+    [CONFIG.spreadsheet.stretchSheetName, ACTIVE_HEADER],
+    [CONFIG.spreadsheet.rejectedSheetName, ACTIVE_HEADER],
+    [CONFIG.spreadsheet.sourceHealthSheetName, SOURCE_HEALTH_HEADER],
+  ];
+  if (includeArchive) {
+    targets.push([
+      CONFIG.spreadsheet.archiveSheetName,
+      ARCHIVE_HEADER,
+    ]);
+  }
+
+  for (const [sheetName, header] of targets) {
+    await overwriteRows(sheets, spreadsheetId, sheetName, header, []);
+    console.log(`Reset "${sheetName}" and preserved its header.`);
+  }
+
+  await setResetDate(sheets, spreadsheetId, todayISO());
+  console.log(
+    includeArchive
+      ? "Reset complete, including Archived Jobs."
+      : "Reset complete. Archived Jobs was preserved."
   );
 }
