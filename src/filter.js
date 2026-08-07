@@ -128,6 +128,11 @@ const HARD_LOCATION_REJECTIONS = [
   /\basia pacific[\s/-]*only\b/i,
 ];
 
+const EXPLICIT_UNSUPPORTED_REMOTE_LOCATIONS = [
+  /\b(?:united states|usa|u\.s\.|canada)\b/i,
+  /\b(?:australia|new zealand|india|singapore)\b/i,
+];
+
 const DESCRIPTION_LOCATION_REJECTIONS = [
   /\bmust be (?:located|based|resident) in (?:the )?(?:us|u\.s\.|usa|united states|canada)\b/i,
   /\b(?:us|u\.s\.|usa|united states|canada) work authorization required\b/i,
@@ -176,6 +181,8 @@ const WORLDWIDE_PATTERNS = [
 const EMEA_AFRICA_PATTERNS = [
   /\bemea\b/i,
   /\bafrica\b/i,
+  /\b(?:north|northern|south|southern|east|eastern|west|western|central) africa\b/i,
+  /\b(?:algeria|angola|benin|botswana|burkina faso|burundi|cabo verde|cape verde|cameroon|central african republic|chad|comoros|congo|c[oô]te d['’]ivoire|ivory coast|djibouti|equatorial guinea|eritrea|eswatini|ethiopia|gabon|gambia|ghana|guinea-bissau|kenya|lesotho|liberia|libya|madagascar|malawi|mali|mauritania|mauritius|morocco|mozambique|namibia|niger|nigeria|rwanda|s[aã]o tom[eé]|senegal|seychelles|sierra leone|somalia|south sudan|sudan|tanzania|togo|tunisia|uganda|zambia|zimbabwe)\b/i,
 ];
 
 const EUROPE_PATTERNS = [
@@ -361,6 +368,22 @@ export function analyzeEligibility(job) {
       points: 0,
       hardReject: true,
       reason: "Hiring geography or work authorization excludes Egypt",
+    };
+  }
+  const hasAcceptedLocation = matchesAny(location, [
+    ...EGYPT_MENA_PATTERNS,
+    ...WORLDWIDE_PATTERNS,
+    ...EMEA_AFRICA_PATTERNS,
+  ]);
+  if (
+    !hasAcceptedLocation &&
+    matchesAny(location, EXPLICIT_UNSUPPORTED_REMOTE_LOCATIONS)
+  ) {
+    return {
+      status: "Not eligible",
+      points: 0,
+      hardReject: true,
+      reason: "Remote role is tied to a hiring country outside accepted regions",
     };
   }
   if (matchesAny(location, EGYPT_MENA_PATTERNS)) {

@@ -11,6 +11,18 @@ export const CONFIG = {
     workingnomads: { enabled: true },   // NEW
     jobspresso: { enabled: true },      // NEW
     productjobsanywhere: { enabled: true },
+    workable: {
+      enabled: true,
+      queries: [
+        "laravel",
+        "php developer",
+        "backend engineer",
+        "product engineer",
+        "full stack",
+        "fullstack",
+      ],
+      locations: ["", "Africa"],
+    },
   },
 
   spreadsheet: {
@@ -41,6 +53,7 @@ export const CONFIG = {
       "Remotive",
       "WorkingNomads",
       "Jobspresso",
+      "Workable",
     ],
     strongSkills: [
       "php",

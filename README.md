@@ -2,8 +2,9 @@
 
 A daily recommendation system for senior PHP, Laravel, backend, full-stack,
 and product-engineering roles. It collects remote listings, evaluates whether
-they can hire someone in Egypt, scores them against a resume-derived profile,
-and writes explainable recommendations to one Google spreadsheet.
+they can hire someone in Egypt or elsewhere in Africa, scores them against a
+resume-derived profile, and writes explainable recommendations to one Google
+spreadsheet.
 
 The tracker runs automatically through GitHub Actions at 06:00 UTC, which is
 08:00 or 09:00 in Cairo depending on daylight-saving time.
@@ -13,10 +14,10 @@ The tracker runs automatically through GitHub Actions at 06:00 UTC, which is
 On every run, the tracker:
 
 1. Fetches listings from RemoteOK, We Work Remotely, Larajobs, Remotive,
-   Working Nomads, Jobspresso, and Product Jobs Anywhere.
+   Working Nomads, Jobspresso, Product Jobs Anywhere, and Workable.
 2. Classifies roles as Laravel/PHP Backend, Backend, Product Engineer,
    backend-focused Full-Stack, Stretch, or Rejected.
-3. Separates remote work from actual Egypt hiring eligibility.
+3. Separates remote work from actual Egypt/Africa hiring eligibility.
 4. Extracts stack, domain, product-ownership, and employment signals from the
    description text already supplied by each source.
 5. Produces a 0-100 fit score with match reasons, gaps, and confidence.
@@ -171,6 +172,9 @@ at the same time.
 Tracker settings are in `src/config.js`:
 
 - `sources` enables or disables each source.
+- `sources.workable.queries` controls Workable role searches; the defaults
+  include Laravel, PHP, backend, product-engineering, and full-stack roles.
+- `sources.workable.locations` runs both global and Africa-focused searches.
 - `spreadsheet` controls tab names, archive cadence, and rejected-job
   retention.
 - `matching.dailyShortlistLimit` controls the Today view size.

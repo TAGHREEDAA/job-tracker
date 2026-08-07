@@ -9,6 +9,7 @@ import { fetchRemotive } from "./sources/remotive.js";
 import { fetchWorkingNomads } from "./sources/workingnomads.js";
 import { fetchJobspresso } from "./sources/jobspresso.js";
 import { fetchProductJobsAnywhere } from "./sources/productjobsanywhere.js";
+import { fetchWorkable } from "./sources/workable.js";
 import { evaluateJobs } from "./filter.js";
 import { writeJobsToSheets } from "./sheets.js";
 
@@ -96,6 +97,7 @@ async function main() {
       CONFIG.sources.productjobsanywhere.enabled,
       fetchProductJobsAnywhere,
     ],
+    ["Workable", CONFIG.sources.workable.enabled, fetchWorkable],
   ];
   const sourceResults = await Promise.all(
     sourceDefinitions.map(([name, enabled, fn]) =>

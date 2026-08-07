@@ -59,6 +59,15 @@ test("classifies target, stretch, and rejected role families", () => {
     classifyRole(job({ title: "Senior AI Engineer" })).rejected,
     true
   );
+  assert.equal(
+    classifyRole(
+      job({
+        title: "Senior Fullstack Engineer",
+        description: "Build React interfaces and backend APIs with PostgreSQL.",
+      })
+    ).category,
+    "Backend-Focused Full-Stack"
+  );
 });
 
 test("separates remote work from Egypt hiring eligibility", () => {
@@ -71,6 +80,10 @@ test("separates remote work from Egypt hiring eligibility", () => {
     "Eligible - EMEA/Africa"
   );
   assert.equal(
+    analyzeEligibility(job({ location: "Remote · Kenya" })).status,
+    "Eligible - EMEA/Africa"
+  );
+  assert.equal(
     analyzeEligibility(job({ location: "Europe only" })).manualReview,
     true
   );
@@ -78,6 +91,17 @@ test("separates remote work from Egypt hiring eligibility", () => {
     analyzeEligibility(job({ location: "Remote / USA only" }))
       .hardReject,
     true
+  );
+  assert.equal(
+    analyzeEligibility(job({ location: "Remote · Toronto, Canada" }))
+      .hardReject,
+    true
+  );
+  assert.equal(
+    analyzeEligibility(
+      job({ location: "Remote · Worldwide · Toronto, Canada" })
+    ).status,
+    "Eligible - Worldwide"
   );
   assert.equal(
     analyzeEligibility(job({ location: "Remote/Hybrid, London" }))
