@@ -8,6 +8,7 @@ import {
   isResetDue,
   jobToRow,
   legacyRowToActive,
+  sortRowsNewestFirst,
   withinRetention,
 } from "../src/sheets.js";
 
@@ -88,5 +89,33 @@ test("rejected retention keeps recent rows and expires old rows", () => {
   assert.equal(
     withinRetention("2026-06-01", "2026-07-28", 30),
     false
+  );
+});
+
+test("compacts blank rows and sorts jobs by posted date descending", () => {
+  const older = jobToRow(
+    { title: "Older", datePosted: "2026-07-01" },
+    "2026-08-08"
+  );
+  const newer = jobToRow(
+    { title: "Newer", datePosted: "2026-08-07" },
+    "2026-08-08"
+  );
+  const missingPostedDate = jobToRow(
+    { title: "Found Today" },
+    "2026-08-08"
+  );
+
+  const sorted = sortRowsNewestFirst([
+    older,
+    [],
+    ["", "", ""],
+    newer,
+    missingPostedDate,
+  ]);
+
+  assert.deepEqual(
+    sorted.map((row) => row[6]),
+    ["Found Today", "Newer", "Older"]
   );
 });

@@ -25,6 +25,8 @@ On every run, the tracker:
    preferring direct ATS application links.
 7. Creates a ranked daily shortlist and separate active, stretch, rejected,
    archive, and source-health views.
+8. Compacts every managed job tab from row 2 and sorts jobs newest-first by
+   Date Posted, falling back to Date Found when the posting date is missing.
 
 One failing source does not stop the remaining sources from running.
 

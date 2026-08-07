@@ -118,6 +118,37 @@ function padRow(row, length) {
   return copy.slice(0, length);
 }
 
+function dateValue(value) {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+function rowDateValue(row, dateColumns) {
+  for (const column of dateColumns) {
+    const value = dateValue(row[column]);
+    if (value !== Number.NEGATIVE_INFINITY) return value;
+  }
+  return Number.NEGATIVE_INFINITY;
+}
+
+export function sortRowsNewestFirst(
+  rows,
+  dateColumns = [13, 0]
+) {
+  return rows
+    .filter((row) => row.some(Boolean))
+    .map((row, originalIndex) => ({ row, originalIndex }))
+    .sort((left, right) => {
+      const difference =
+        rowDateValue(right.row, dateColumns) -
+        rowDateValue(left.row, dateColumns);
+      if (difference) return difference;
+      return left.originalIndex - right.originalIndex;
+    })
+    .map(({ row }) => row);
+}
+
 export function legacyRowToActive(row) {
   const old = padRow(row, OLD_HEADER.length);
   const job = {
@@ -979,6 +1010,42 @@ async function writeSourceHealth(
   );
 }
 
+async function normalizeManagedJobSheets(
+  sheets,
+  spreadsheetId
+) {
+  const targets = [
+    [CONFIG.spreadsheet.backendSheetName, ACTIVE_HEADER, [13, 0]],
+    [CONFIG.spreadsheet.productSheetName, ACTIVE_HEADER, [13, 0]],
+    [CONFIG.spreadsheet.todaySheetName, ACTIVE_HEADER, [13, 0]],
+    [CONFIG.spreadsheet.stretchSheetName, ACTIVE_HEADER, [13, 0]],
+    [CONFIG.spreadsheet.rejectedSheetName, ACTIVE_HEADER, [13, 0]],
+    [CONFIG.spreadsheet.archiveSheetName, ARCHIVE_HEADER, [13, 20, 0]],
+  ];
+
+  for (const [sheetName, header, dateColumns] of targets) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      columnsForHeader(header)
+    );
+    const rows = sortRowsNewestFirst(
+      values
+        .slice(1)
+        .map((row) => padRow(row, header.length)),
+      dateColumns
+    );
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      header,
+      rows
+    );
+  }
+}
+
 export async function writeJobsToSheets(
   results,
   sourceHealth,
@@ -1066,6 +1133,7 @@ export async function writeJobsToSheets(
     sourceHealth,
     new Date().toISOString()
   );
+  await normalizeManagedJobSheets(sheets, spreadsheetId);
 }
 
 export async function resetManagedSheets(
