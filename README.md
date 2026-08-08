@@ -93,15 +93,18 @@ the matching role during its configured cooldown.
 
 ### Daily email notifications
 
-After a successful daily run, the tracker can send one short Gmail message for
+After a successful daily run, the tracker can send one short Gmail API message for
 new jobs that meet at least one of these conditions: the job appears in Today,
 is marked `⭐ PRIORITY`, or has a score greater than 63. Rejected and previously
 stored jobs are never included, and no message is sent when nothing qualifies.
 
-Configure these encrypted GitHub Actions secrets:
+The integration uses OAuth2 with the narrow `gmail.send` scope and offline
+access. Configure these encrypted GitHub Actions secrets:
 
-- `GMAIL_ADDRESS` — the Gmail account used to send the message.
-- `GMAIL_APP_PASSWORD` — a Google App Password, not the normal account password.
+- `GMAIL_ADDRESS` — the Gmail account authorized to send the message.
+- `GMAIL_OAUTH_CLIENT_ID` — the Google OAuth client ID.
+- `GMAIL_OAUTH_CLIENT_SECRET` — the Google OAuth client secret.
+- `GMAIL_OAUTH_REFRESH_TOKEN` — the offline token issued after consent.
 - `NOTIFICATION_EMAIL` — the inbox that receives the message.
 
 The repository and workflow logs never print these values. The email contains

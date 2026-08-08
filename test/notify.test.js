@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildJobEmail,
+  buildRawGmailMessage,
   selectNotificationJobs,
   sendDailyJobEmail,
 } from "../src/notify.js";
@@ -40,6 +41,26 @@ test("builds a short email and escapes untrusted listing text", () => {
   assert.match(message.text, /Backend|Engineer/);
   assert.doesNotMatch(message.html, /<script>/);
   assert.match(message.html, /A &amp; B/);
+});
+
+test("builds a Gmail API MIME message without allowing header injection", () => {
+  const raw = buildRawGmailMessage(
+    { subject: "Daily jobs", text: "Plain text", html: "<p>HTML</p>" },
+    "sender@example.com",
+    "recipient@example.com"
+  );
+  const mime = Buffer.from(raw, "base64url").toString("utf8");
+
+  assert.match(mime, /From: Job Tracker <sender@example.com>/);
+  assert.match(mime, /Content-Type: multipart\/alternative/);
+  assert.throws(
+    () => buildRawGmailMessage(
+      { subject: "Daily jobs", text: "Plain", html: "<p>HTML</p>" },
+      "sender@example.com\r\nBcc: attacker@example.com",
+      "recipient@example.com"
+    ),
+    /Invalid email notification address/
+  );
 });
 
 test("does not send when no matching jobs exist", async () => {

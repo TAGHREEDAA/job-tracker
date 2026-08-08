@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import { google } from "googleapis";
 
 const SCORE_THRESHOLD = 63;
 
@@ -23,6 +23,56 @@ function safeJobUrl(value) {
   } catch {
     return "";
   }
+}
+
+function safeHeader(value) {
+  return (value || "").toString().replace(/[\r\n]+/g, " ").trim();
+}
+
+function safeEmailAddress(value) {
+  const email = safeHeader(value);
+  if (!/^[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+$/.test(email)) {
+    throw new Error("Invalid email notification address configuration");
+  }
+  return email;
+}
+
+function encodedHeader(value) {
+  return `=?UTF-8?B?${Buffer.from(safeHeader(value), "utf8").toString("base64")}?=`;
+}
+
+function wrappedBase64(value) {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .match(/.{1,76}/g)
+    ?.join("\r\n") || "";
+}
+
+export function buildRawGmailMessage(message, sender, recipient) {
+  const safeSender = safeEmailAddress(sender);
+  const safeRecipient = safeEmailAddress(recipient);
+  const boundary = `job-tracker-${Date.now().toString(36)}`;
+  const mime = [
+    `From: Job Tracker <${safeSender}>`,
+    `To: ${safeRecipient}`,
+    `Subject: ${encodedHeader(message.subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrappedBase64(message.text),
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrappedBase64(message.html),
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return Buffer.from(mime, "utf8").toString("base64url");
 }
 
 export function selectNotificationJobs(newJobs, todayJobs) {
@@ -71,22 +121,30 @@ export async function sendDailyJobEmail(
   }
 
   const sender = env.GMAIL_ADDRESS;
-  const password = env.GMAIL_APP_PASSWORD;
   const recipient = env.NOTIFICATION_EMAIL;
-  if (!sender || !password || !recipient) {
-    console.log("Email notification: Gmail secrets are incomplete; skipped.");
+  const clientId = env.GMAIL_OAUTH_CLIENT_ID;
+  const clientSecret = env.GMAIL_OAUTH_CLIENT_SECRET;
+  const refreshToken = env.GMAIL_OAUTH_REFRESH_TOKEN;
+  if (
+    !sender ||
+    !recipient ||
+    !clientId ||
+    !clientSecret ||
+    !refreshToken
+  ) {
+    console.log("Email notification: Gmail API secrets are incomplete; skipped.");
     return { sent: false, reason: "unconfigured" };
   }
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: sender, pass: password },
-  });
   const message = buildJobEmail(jobs, now);
-  await transporter.sendMail({
-    from: `Job Tracker <${sender}>`,
-    to: recipient,
-    ...message,
+  const oauth = new google.auth.OAuth2(clientId, clientSecret);
+  oauth.setCredentials({ refresh_token: refreshToken });
+  const gmail = google.gmail({ version: "v1", auth: oauth });
+  await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {
+      raw: buildRawGmailMessage(message, sender, recipient),
+    },
   });
   console.log(`Email notification: sent ${jobs.length} recommended jobs.`);
   return { sent: true, count: jobs.length };
