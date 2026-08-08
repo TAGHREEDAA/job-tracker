@@ -7,6 +7,7 @@ import {
   classifyRole,
   createDedupeKey,
 } from "./filter.js";
+import { repairMojibake } from "./text.js";
 
 const LEGACY_SHEET_NAME = "Jobs";
 const METADATA_SHEET_NAME = "_JobTracker";
@@ -63,7 +64,7 @@ const OLD_HEADER = [
   "Notes",
 ];
 
-function buildAuth() {
+export function buildAuth() {
   const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!credsJson) {
     throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON env var is missing");
@@ -1033,7 +1034,11 @@ async function normalizeManagedJobSheets(
     const rows = sortRowsNewestFirst(
       values
         .slice(1)
-        .map((row) => padRow(row, header.length)),
+        .map((row) => {
+          const padded = padRow(row, header.length);
+          padded[8] = repairMojibake(padded[8]);
+          return padded;
+        }),
       dateColumns
     );
     await overwriteRows(

@@ -180,6 +180,8 @@ Tracker settings are in `src/config.js`:
 - `spreadsheet` controls tab names, archive cadence, and rejected-job
   retention.
 - `matching.dailyShortlistLimit` controls the Today view size.
+- `matching.maxRowsPerCompany` limits one company to its three highest-ranked
+  listings per run.
 - `matching.recommendations` controls score thresholds.
 - `matching.strongSkills` contains primary resume-fit technologies.
 - `matching.transferableSkills` contains acceptable adjacent technologies.
@@ -188,8 +190,20 @@ Tracker settings are in `src/config.js`:
 - `matching.sourcePreference` breaks cross-source duplicate ties.
 - `maxAgeDays` controls listing freshness.
 
+Private application history and excluded-company preferences are read from a
+separate Google Sheet through the `PRIVATE_REGISTRY_SHEET_ID` Actions secret.
+The private workbook is never named or identified in repository content, and
+workflow logs contain aggregate counts only. Its `Applications` and
+`Excluded Companies` tabs are the source of truth for suppression and the
+six-month rejection cooldown.
+
 Role-family and Egypt-eligibility rules live in `src/filter.js`, next to the
 scoring logic and human-readable reasons.
+
+Listings with limited descriptions are enriched before scoring through public
+Greenhouse, Lever, Ashby, Workable, Recruitee, and SmartRecruiters endpoints.
+Unknown HTTPS job pages use a bounded HTML fallback. Requests contain only the
+public job URL/identifier and never include spreadsheet or applicant data.
 
 After changing configuration, commit and push the file. The next workflow run
 will use the new settings.

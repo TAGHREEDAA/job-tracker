@@ -10,6 +10,12 @@ import { fetchWorkingNomads } from "./sources/workingnomads.js";
 import { fetchJobspresso } from "./sources/jobspresso.js";
 import { fetchProductJobsAnywhere } from "./sources/productjobsanywhere.js";
 import { fetchWorkable } from "./sources/workable.js";
+import { enrichJobDescriptions } from "./enrich/description.js";
+import { normalizePublicJobText } from "./text.js";
+import {
+  applyPrivateRegistry,
+  loadPrivateRegistry,
+} from "./registry.js";
 import { evaluateJobs } from "./filter.js";
 import { writeJobsToSheets } from "./sheets.js";
 
@@ -104,17 +110,31 @@ async function main() {
       runSource(name, enabled, fn)
     )
   );
-  const all = sourceResults.flatMap((result) => result.jobs);
+  const all = sourceResults
+    .flatMap((result) => result.jobs)
+    .map(normalizePublicJobText);
   const sourceHealth = sourceResults.map((result) => result.health);
 
   console.log(`Total raw jobs: ${all.length}`);
-  const results = evaluateJobs(all);
+  const registry = await loadPrivateRegistry(
+    process.env.PRIVATE_REGISTRY_SHEET_ID
+  );
+  const registryResult = applyPrivateRegistry(all, registry);
+  console.log(
+    `Private registry: ${registryResult.skipped} suppressed, ` +
+      `${registryResult.marked} marked as previous-company applications`
+  );
+  const enriched = await enrichJobDescriptions(registryResult.jobs);
+  const results = evaluateJobs(enriched);
   console.log(
     `Recommendations: ${results.accepted.length} accepted, ` +
       `${results.stretch.length} stretch, ${results.rejected.length} rejected`
   );
   console.log(
     `Cross-source duplicates removed: ${results.duplicateCount}`
+  );
+  console.log(
+    `Extra listings removed by company cap: ${results.companyLimitCount}`
   );
 
   if (DRY_RUN) {

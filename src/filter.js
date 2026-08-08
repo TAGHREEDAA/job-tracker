@@ -512,6 +512,10 @@ export function evaluateJob(job, now = new Date()) {
   const reasons = [];
   const gaps = [];
 
+  if (job.previouslyAppliedCompany) {
+    reasons.push("↩︎ Previously applied to this company");
+  }
+
   let score = eligibility.points;
   reasons.push(eligibility.reason);
 
@@ -722,6 +726,22 @@ export function deduplicateJobs(jobs) {
   return [...byKey.values()];
 }
 
+export function limitJobsPerCompany(
+  jobs,
+  limit = CONFIG.matching.maxRowsPerCompany
+) {
+  if (!Number.isInteger(limit) || limit < 1) return [...jobs];
+  const counts = new Map();
+  return jobs.filter((job) => {
+    const company = normalizedCompany(job.company);
+    if (!company) return true;
+    const count = counts.get(company) || 0;
+    if (count >= limit) return false;
+    counts.set(company, count + 1);
+    return true;
+  });
+}
+
 export function evaluateJobs(jobs, now = new Date()) {
   const evaluated = jobs.map((job) => evaluateJob(job, now));
   const deduplicated = deduplicateJobs(evaluated);
@@ -734,20 +754,31 @@ export function evaluateJobs(jobs, now = new Date()) {
     );
   });
 
+  const acceptedCandidates = sorted.filter((job) =>
+    ["Apply Today", "Strong Match", "Manual Review"].includes(
+      job.recommendation
+    )
+  );
+  const stretchCandidates = sorted.filter(
+    (job) => job.recommendation === "Stretch"
+  );
+  const rejectedCandidates = sorted.filter(
+    (job) => job.recommendation === "Reject"
+  );
+  const accepted = limitJobsPerCompany(acceptedCandidates);
+  const stretch = limitJobsPerCompany(stretchCandidates);
+  const rejected = limitJobsPerCompany(rejectedCandidates);
+
   return {
-    accepted: sorted.filter((job) =>
-      ["Apply Today", "Strong Match", "Manual Review"].includes(
-        job.recommendation
-      )
-    ),
-    stretch: sorted.filter(
-      (job) => job.recommendation === "Stretch"
-    ),
-    rejected: sorted.filter(
-      (job) => job.recommendation === "Reject"
-    ),
-    all: sorted,
+    accepted,
+    stretch,
+    rejected,
+    all: [...accepted, ...stretch, ...rejected],
     duplicateCount: evaluated.length - deduplicated.length,
+    companyLimitCount:
+      acceptedCandidates.length - accepted.length +
+      stretchCandidates.length - stretch.length +
+      rejectedCandidates.length - rejected.length,
   };
 }
 

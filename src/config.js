@@ -37,8 +37,15 @@ export const CONFIG = {
     rejectedRetentionDays: 30,
   },
 
+  privateRegistry: {
+    applicationsSheetName: "Applications",
+    excludedCompaniesSheetName: "Excluded Companies",
+    rejectionCooldownMonths: 6,
+  },
+
   matching: {
     dailyShortlistLimit: 10,
+    maxRowsPerCompany: 3,
     recommendations: {
       applyToday: 80,
       strongMatch: 65,

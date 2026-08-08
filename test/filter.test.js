@@ -8,6 +8,7 @@ import {
   deduplicateJobs,
   evaluateJob,
   evaluateJobs,
+  limitJobsPerCompany,
 } from "../src/filter.js";
 
 const NOW = new Date("2026-07-28T12:00:00Z");
@@ -203,4 +204,16 @@ test("returns accepted, stretch, rejected, and duplicate counts", () => {
   assert.equal(results.stretch.length, 1);
   assert.equal(results.rejected.length, 1);
   assert.equal(results.duplicateCount, 1);
+});
+
+test("keeps only the three highest-ranked jobs from one company", () => {
+  const ranked = [95, 90, 85, 80].map((fitScore, index) => ({
+    company: index === 3 ? "Example, Inc." : "Example Inc",
+    title: `Role ${index}`,
+    fitScore,
+  }));
+  assert.deepEqual(
+    limitJobsPerCompany(ranked, 3).map((item) => item.fitScore),
+    [95, 90, 85]
+  );
 });
