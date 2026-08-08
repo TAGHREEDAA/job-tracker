@@ -904,6 +904,56 @@ async function writeActiveJobs(
       `${stretchResult.fresh.length} stretch; ` +
       `${acceptedResult.skipped + stretchResult.skipped} duplicates skipped.`
   );
+  return {
+    accepted: acceptedResult.fresh,
+    stretch: stretchResult.fresh,
+    all: [...acceptedResult.fresh, ...stretchResult.fresh],
+  };
+}
+
+export async function removeSuppressedCompanyJobs(
+  spreadsheetId,
+  isSuppressedCompany
+) {
+  if (!spreadsheetId) {
+    throw new Error("GOOGLE_SHEET_ID env var is missing");
+  }
+  const sheets = google.sheets({ version: "v4", auth: buildAuth() });
+  const sheetNames = [
+    CONFIG.spreadsheet.backendSheetName,
+    CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.todaySheetName,
+    CONFIG.spreadsheet.stretchSheetName,
+    CONFIG.spreadsheet.rejectedSheetName,
+  ];
+  let removed = 0;
+
+  for (const sheetName of sheetNames) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      columnsForHeader(ACTIVE_HEADER)
+    );
+    if (!values.length || !sameRow(values[0], ACTIVE_HEADER)) continue;
+    const rows = values
+      .slice(1)
+      .filter((row) => row.some(Boolean))
+      .map((row) => padRow(row, ACTIVE_HEADER.length));
+    const remaining = rows.filter((row) => !isSuppressedCompany(row[7]));
+    if (remaining.length === rows.length) continue;
+    removed += rows.length - remaining.length;
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      ACTIVE_HEADER,
+      sortRowsNewestFirst(remaining)
+    );
+  }
+
+  console.log(`Private registry cleanup: ${removed} existing view rows removed.`);
+  return removed;
 }
 
 async function syncTodayManualFields(
@@ -1486,7 +1536,7 @@ export async function writeJobsToSheets(
   const today = todayISO();
   await syncTodayManualFields(sheets, spreadsheetId);
   await archiveActiveJobsIfDue(sheets, spreadsheetId, today);
-  await writeActiveJobs(
+  const newlyAdded = await writeActiveJobs(
     sheets,
     spreadsheetId,
     results,
@@ -1516,6 +1566,13 @@ export async function writeJobsToSheets(
     new Date().toISOString()
   );
   await normalizeManagedJobSheets(sheets, spreadsheetId);
+  return {
+    newJobs: newlyAdded.all,
+    todayJobs: results.accepted.slice(
+      0,
+      CONFIG.matching.dailyShortlistLimit
+    ),
+  };
 }
 
 export async function resetManagedSheets(

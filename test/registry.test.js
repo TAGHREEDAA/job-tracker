@@ -4,6 +4,7 @@ import test from "node:test";
 import { createDedupeKey } from "../src/filter.js";
 import {
   applyPrivateRegistry,
+  loadPrivateRegistry,
   parsePrivateRegistry,
 } from "../src/registry.js";
 
@@ -37,14 +38,37 @@ test("suppresses an already-applied exact role", () => {
   assert.equal(result.skipped, 1);
 });
 
-test("marks a different role at a previously applied company", () => {
+test("suppresses a different role at a previously applied company", () => {
   const registry = parsePrivateRegistry([
     ["Example", "Product Engineer", "https://x.test/old", "old", "Applied"],
   ], [], NOW);
   const result = applyPrivateRegistry([job()], registry, NOW);
-  assert.equal(result.jobs.length, 1);
-  assert.equal(result.jobs[0].previouslyAppliedCompany, true);
-  assert.equal(result.marked, 1);
+  assert.equal(result.jobs.length, 0);
+  assert.equal(result.skipped, 1);
+});
+
+test("matches an applied company when the registry includes a parenthetical alias", () => {
+  const registry = parsePrivateRegistry([
+    [
+      "Al Watania Information Systems (Wisys)",
+      "Senior Full Stack Developer",
+      "https://x.test/old",
+      "old",
+      "Applied",
+    ],
+  ], [], NOW);
+  const result = applyPrivateRegistry([
+    job({ company: "Al-Watania Information Systems" }),
+  ], registry, NOW);
+  assert.equal(result.jobs.length, 0);
+  assert.equal(result.skipped, 1);
+});
+
+test("does not suppress a different role for an expired exact rejection", () => {
+  const registry = parsePrivateRegistry([
+    ["Example", "Old Role", "https://x.test/old", "old", "Rejected", "2025-01-01"],
+  ], [], NOW);
+  assert.equal(applyPrivateRegistry([job()], registry, NOW).jobs.length, 1);
 });
 
 test("enforces and expires a six-month rejection cooldown", () => {
@@ -81,4 +105,11 @@ test("ignores the privacy-safe template rows", () => {
     NOW
   );
   assert.equal(applyPrivateRegistry([job()], registry, NOW).jobs.length, 1);
+});
+
+test("fails closed when the private registry is required but missing", async () => {
+  await assert.rejects(
+    loadPrivateRegistry("", { required: true }),
+    /PRIVATE_REGISTRY_SHEET_ID/
+  );
 });

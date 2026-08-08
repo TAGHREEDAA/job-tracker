@@ -7,7 +7,6 @@ import { buildAuth } from "./sheets.js";
 const SUPPRESSED_STATUSES = new Set(["applied", "interview", "offer"]);
 const COMPANY_HISTORY_STATUSES = new Set([
   "applied",
-  "rejected",
   "interview",
   "offer",
   "withdrawn",
@@ -19,9 +18,19 @@ function normalize(value) {
 
 function normalizeCompany(value) {
   return normalize(value)
+    .replace(/\([^)]*\)/g, " ")
     .replace(/\b(inc|llc|ltd|limited|corp|corporation|company|co)\b/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+export function isCompanySuppressed(company, registry) {
+  const normalized = normalizeCompany(company);
+  if (!normalized) return false;
+  return Boolean(
+    registry.excludedCompanies.has(normalized) ||
+    registry.companiesWithHistory.has(normalized)
+  );
 }
 
 function parseDate(value) {
@@ -133,8 +142,16 @@ export function emptyPrivateRegistry() {
   return parsePrivateRegistry([], []);
 }
 
-export async function loadPrivateRegistry(spreadsheetId) {
-  if (!spreadsheetId) return emptyPrivateRegistry();
+export async function loadPrivateRegistry(
+  spreadsheetId,
+  { required = false } = {}
+) {
+  if (!spreadsheetId) {
+    if (required) {
+      throw new Error("PRIVATE_REGISTRY_SHEET_ID env var is missing");
+    }
+    return emptyPrivateRegistry();
+  }
   try {
     const sheets = google.sheets({ version: "v4", auth: buildAuth() });
     const applicationsName = CONFIG.privateRegistry.applicationsSheetName;
@@ -151,7 +168,13 @@ export async function loadPrivateRegistry(spreadsheetId) {
       applications?.values || [],
       excluded?.values || []
     );
-  } catch {
+  } catch (error) {
+    if (required) {
+      throw new Error(
+        "Private registry read failed; refusing to continue without private filters.",
+        { cause: error }
+      );
+    }
     console.warn(
       "[Private Registry] Read failed; continuing without private filters"
     );
@@ -169,11 +192,14 @@ function shouldSuppressApplication(application, now) {
 export function applyPrivateRegistry(jobs, registry, now = new Date()) {
   const filtered = [];
   let skipped = 0;
-  let marked = 0;
 
   for (const job of jobs) {
     const company = normalizeCompany(job.company);
-    if (company && registry.excludedCompanies.has(company)) {
+    if (
+      company &&
+      (registry.excludedCompanies.has(company) ||
+        registry.companiesWithHistory.has(company))
+    ) {
       skipped += 1;
       continue;
     }
@@ -187,13 +213,8 @@ export function applyPrivateRegistry(jobs, registry, now = new Date()) {
       continue;
     }
 
-    if (company && registry.companiesWithHistory.has(company)) {
-      filtered.push({ ...job, previouslyAppliedCompany: true });
-      marked += 1;
-    } else {
-      filtered.push(job);
-    }
+    filtered.push(job);
   }
 
-  return { jobs: filtered, skipped, marked };
+  return { jobs: filtered, skipped };
 }

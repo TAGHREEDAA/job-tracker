@@ -14,10 +14,19 @@ import { enrichJobDescriptions } from "./enrich/description.js";
 import { normalizePublicJobText } from "./text.js";
 import {
   applyPrivateRegistry,
+  isCompanySuppressed,
   loadPrivateRegistry,
 } from "./registry.js";
 import { evaluateJobs } from "./filter.js";
-import { moveAppliedJobs, writeJobsToSheets } from "./sheets.js";
+import {
+  moveAppliedJobs,
+  removeSuppressedCompanyJobs,
+  writeJobsToSheets,
+} from "./sheets.js";
+import {
+  selectNotificationJobs,
+  sendDailyJobEmail,
+} from "./notify.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -129,12 +138,18 @@ async function main() {
 
   console.log(`Total raw jobs: ${all.length}`);
   const registry = await loadPrivateRegistry(
-    process.env.PRIVATE_REGISTRY_SHEET_ID
+    process.env.PRIVATE_REGISTRY_SHEET_ID,
+    { required: !DRY_RUN }
   );
+  if (!DRY_RUN) {
+    await removeSuppressedCompanyJobs(
+      spreadsheetId,
+      (company) => isCompanySuppressed(company, registry)
+    );
+  }
   const registryResult = applyPrivateRegistry(all, registry);
   console.log(
-    `Private registry: ${registryResult.skipped} suppressed, ` +
-      `${registryResult.marked} marked as previous-company applications`
+    `Private registry: ${registryResult.skipped} jobs suppressed`
   );
   const enriched = await enrichJobDescriptions(registryResult.jobs);
   const results = evaluateJobs(enriched);
@@ -174,7 +189,16 @@ async function main() {
     return;
   }
 
-  await writeJobsToSheets(results, sourceHealth, spreadsheetId);
+  const writeResult = await writeJobsToSheets(
+    results,
+    sourceHealth,
+    spreadsheetId
+  );
+  const notificationJobs = selectNotificationJobs(
+    writeResult.newJobs,
+    writeResult.todayJobs
+  );
+  await sendDailyJobEmail(notificationJobs);
 }
 
 main().catch((err) => {

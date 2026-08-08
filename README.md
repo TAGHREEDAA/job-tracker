@@ -86,6 +86,27 @@ updates the private Applications registry before removing active-view copies,
 so later searches do not add the job back. Workflow logs contain aggregate
 counts only.
 
+Companies with an **Applied**, **Interview**, **Offer**, or **Withdrawn** entry
+in the private Applications registry are removed from all opportunity views and
+suppressed from future searches. A Rejected entry continues to suppress only
+the matching role during its configured cooldown.
+
+### Daily email notifications
+
+After a successful daily run, the tracker can send one short Gmail message for
+new jobs that meet at least one of these conditions: the job appears in Today,
+is marked `⭐ PRIORITY`, or has a score greater than 63. Rejected and previously
+stored jobs are never included, and no message is sent when nothing qualifies.
+
+Configure these encrypted GitHub Actions secrets:
+
+- `GMAIL_ADDRESS` — the Gmail account used to send the message.
+- `GMAIL_APP_PASSWORD` — a Google App Password, not the normal account password.
+- `NOTIFICATION_EMAIL` — the inbox that receives the message.
+
+The repository and workflow logs never print these values. The email contains
+only title, company, score, and job URL.
+
 ### Existing spreadsheet migration
 
 If the spreadsheet still has the original **Jobs** tab, the next real run:
