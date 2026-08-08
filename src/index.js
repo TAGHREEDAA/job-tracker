@@ -17,7 +17,7 @@ import {
   loadPrivateRegistry,
 } from "./registry.js";
 import { evaluateJobs } from "./filter.js";
-import { writeJobsToSheets } from "./sheets.js";
+import { moveAppliedJobs, writeJobsToSheets } from "./sheets.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -73,6 +73,18 @@ async function runSource(name, enabled, fn) {
 async function main() {
   console.log(`=== Job Tracker — ${new Date().toISOString()} ===`);
   if (DRY_RUN) console.log("[DRY RUN — no sheet writes]");
+
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  const privateRegistryId = process.env.PRIVATE_REGISTRY_SHEET_ID;
+  if (!DRY_RUN) {
+    if (!spreadsheetId) {
+      throw new Error("GOOGLE_SHEET_ID env var is missing");
+    }
+    if (!privateRegistryId) {
+      throw new Error("PRIVATE_REGISTRY_SHEET_ID env var is missing");
+    }
+    await moveAppliedJobs(spreadsheetId, privateRegistryId);
+  }
 
   const sourceDefinitions = [
     ["RemoteOK", CONFIG.sources.remoteok.enabled, fetchRemoteOK],
@@ -162,10 +174,6 @@ async function main() {
     return;
   }
 
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-  if (!spreadsheetId) {
-    throw new Error("GOOGLE_SHEET_ID env var is missing");
-  }
   await writeJobsToSheets(results, sourceHealth, spreadsheetId);
 }
 

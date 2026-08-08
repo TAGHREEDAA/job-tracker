@@ -49,6 +49,17 @@ export const SOURCE_HEALTH_HEADER = [
   "Message",
 ];
 
+const PRIVATE_APPLICATION_HEADER = [
+  "Company",
+  "Title",
+  "URL",
+  "Dedupe Key",
+  "Status",
+  "Applied Date",
+  "Cooldown Until",
+  "Updated At",
+];
+
 const OLD_HEADER = [
   "Date Found",
   "Priority",
@@ -219,6 +230,110 @@ function rowIdentity(row) {
   };
 }
 
+export function isAppliedStatus(value) {
+  return normalizedStatus(value).toLowerCase() === "applied";
+}
+
+function sameIdentity(left, right) {
+  const leftIdentity = rowIdentity(left);
+  const rightIdentity = rowIdentity(right);
+  return Boolean(
+    (leftIdentity.url && leftIdentity.url === rightIdentity.url) ||
+    (leftIdentity.dedupeKey &&
+      leftIdentity.dedupeKey === rightIdentity.dedupeKey)
+  );
+}
+
+function mergeJobRows(base, candidate) {
+  const merged = padRow(base, ACTIVE_HEADER.length);
+  const incoming = padRow(candidate, ACTIVE_HEADER.length);
+  for (let index = 0; index < ACTIVE_HEADER.length; index += 1) {
+    if (!merged[index] && incoming[index]) {
+      merged[index] = incoming[index];
+    }
+  }
+  return merged;
+}
+
+export function planAppliedMove(
+  sourceRowsBySheet,
+  existingAppliedRows = []
+) {
+  const normalizedSources = Object.fromEntries(
+    Object.entries(sourceRowsBySheet).map(([sheetName, rows]) => [
+      sheetName,
+      rows
+        .filter((row) => row.some(Boolean))
+        .map((row) => padRow(row, ACTIVE_HEADER.length)),
+    ])
+  );
+  const appliedUrls = new Set();
+  const appliedKeys = new Set();
+
+  for (const rows of Object.values(normalizedSources)) {
+    for (const row of rows) {
+      if (!isAppliedStatus(row[18])) continue;
+      const identity = rowIdentity(row);
+      if (identity.url) appliedUrls.add(identity.url);
+      if (identity.dedupeKey) appliedKeys.add(identity.dedupeKey);
+    }
+  }
+
+  const matchesApplied = (row) => {
+    const identity = rowIdentity(row);
+    return appliedUrls.has(identity.url) || appliedKeys.has(identity.dedupeKey);
+  };
+  const appliedRows = [];
+  for (const existingRow of existingAppliedRows
+    .filter((row) => row.some(Boolean))
+    .map((row) => padRow(row, ACTIVE_HEADER.length))) {
+    const duplicateIndex = appliedRows.findIndex((candidate) =>
+      sameIdentity(candidate, existingRow)
+    );
+    if (duplicateIndex >= 0) {
+      appliedRows[duplicateIndex] = mergeJobRows(
+        appliedRows[duplicateIndex],
+        existingRow
+      );
+    } else {
+      appliedRows.push(existingRow);
+    }
+  }
+
+  for (const rows of Object.values(normalizedSources)) {
+    for (const row of rows.filter(matchesApplied)) {
+      const existingIndex = appliedRows.findIndex((candidate) =>
+        sameIdentity(candidate, row)
+      );
+      if (existingIndex >= 0) {
+        appliedRows[existingIndex] = mergeJobRows(
+          appliedRows[existingIndex],
+          row
+        );
+      } else {
+        const moved = [...row];
+        moved[18] = "Applied";
+        appliedRows.push(moved);
+      }
+    }
+  }
+
+  const movedRows = appliedRows.filter(matchesApplied);
+  const remainingBySheet = Object.fromEntries(
+    Object.entries(normalizedSources).map(([sheetName, rows]) => [
+      sheetName,
+      rows.filter((row) => !matchesApplied(row)),
+    ])
+  );
+
+  return {
+    appliedRows,
+    movedRows,
+    remainingBySheet,
+    movedCount: movedRows.length,
+  };
+}
+
 function addCalendarMonths(value, months) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -310,6 +425,7 @@ function requiredSheets() {
     { title: CONFIG.spreadsheet.todaySheetName },
     { title: CONFIG.spreadsheet.stretchSheetName },
     { title: CONFIG.spreadsheet.rejectedSheetName },
+    { title: CONFIG.spreadsheet.appliedSheetName },
     { title: CONFIG.spreadsheet.archiveSheetName },
     { title: CONFIG.spreadsheet.sourceHealthSheetName },
     { title: METADATA_SHEET_NAME, hidden: true },
@@ -740,7 +856,12 @@ async function writeActiveJobs(
   const identities = await activeIdentities(
     sheets,
     spreadsheetId,
-    [backendName, productName, stretchName]
+    [
+      backendName,
+      productName,
+      stretchName,
+      CONFIG.spreadsheet.appliedSheetName,
+    ]
   );
 
   const acceptedResult = filterNewJobs(
@@ -1020,6 +1141,7 @@ async function normalizeManagedJobSheets(
     [CONFIG.spreadsheet.todaySheetName, ACTIVE_HEADER, [13, 0]],
     [CONFIG.spreadsheet.stretchSheetName, ACTIVE_HEADER, [13, 0]],
     [CONFIG.spreadsheet.rejectedSheetName, ACTIVE_HEADER, [13, 0]],
+    [CONFIG.spreadsheet.appliedSheetName, ACTIVE_HEADER, [13, 0]],
     [CONFIG.spreadsheet.archiveSheetName, ARCHIVE_HEADER, [13, 20, 0]],
   ];
 
@@ -1050,6 +1172,261 @@ async function normalizeManagedJobSheets(
   }
 }
 
+function privateApplicationFromJobRow(row, today) {
+  const padded = padRow(row, ACTIVE_HEADER.length);
+  const status = normalizedStatus(padded[18]);
+  const supportedStatus = ["applied", "interview", "offer", "withdrawn"].find(
+    (candidate) => candidate === status.toLowerCase()
+  );
+  return [
+    padded[7],
+    padded[6],
+    padded[11],
+    rowIdentity(padded).dedupeKey,
+    supportedStatus
+      ? supportedStatus[0].toUpperCase() + supportedStatus.slice(1)
+      : "Applied",
+    today,
+    "",
+    today,
+  ];
+}
+
+async function syncAppliedToPrivateRegistry(
+  sheets,
+  privateRegistryId,
+  appliedRows,
+  today
+) {
+  const sheetName = CONFIG.privateRegistry.applicationsSheetName;
+  let values = await getRows(
+    sheets,
+    privateRegistryId,
+    sheetName,
+    "A:H"
+  );
+  if (!values.length) {
+    await overwriteRows(
+      sheets,
+      privateRegistryId,
+      sheetName,
+      PRIVATE_APPLICATION_HEADER,
+      []
+    );
+    values = [PRIVATE_APPLICATION_HEADER];
+  }
+  if (!sameRow(values[0], PRIVATE_APPLICATION_HEADER)) {
+    throw new Error(
+      "Unexpected private Applications header. Refusing to overwrite private data."
+    );
+  }
+
+  const existingRows = values
+    .slice(1)
+    .filter((row) => row.some(Boolean))
+    .map((row) => padRow(row, PRIVATE_APPLICATION_HEADER.length));
+  const updates = [];
+  const additions = [];
+
+  for (const appliedRow of appliedRows) {
+    const incoming = privateApplicationFromJobRow(appliedRow, today);
+    const existingIndex = existingRows.findIndex((row) =>
+      Boolean(
+        (incoming[2] && row[2] === incoming[2]) ||
+        (incoming[3] && row[3] === incoming[3])
+      )
+    );
+    if (existingIndex < 0) {
+      additions.push(incoming);
+      existingRows.push(incoming);
+      continue;
+    }
+
+    const current = existingRows[existingIndex];
+    const next = [...current];
+    for (const index of [0, 1, 2, 3]) {
+      if (!next[index] && incoming[index]) next[index] = incoming[index];
+    }
+    const currentStatus = normalizedStatus(next[4]).toLowerCase();
+    if (!["interview", "offer"].includes(currentStatus)) {
+      next[4] = incoming[4];
+    }
+    if (!next[5]) next[5] = today;
+    if (next[4] === "Applied") next[6] = "";
+    next[7] = today;
+
+    if (!sameRow(current, next)) {
+      existingRows[existingIndex] = next;
+      updates.push({
+        range: a1Range(sheetName, `A${existingIndex + 2}:H${existingIndex + 2}`),
+        values: [next],
+      });
+    }
+  }
+
+  if (updates.length) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: privateRegistryId,
+      requestBody: {
+        valueInputOption: "USER_ENTERED",
+        data: updates,
+      },
+    });
+  }
+  if (additions.length) {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: privateRegistryId,
+      range: a1Range(sheetName, "A:H"),
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: additions },
+    });
+  }
+
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId: privateRegistryId,
+    fields: "sheets(properties(sheetId,title),tables(tableId,name,range))",
+  });
+  const applicationSheet = (metadata.data.sheets || []).find(
+    (sheet) => sheet.properties.title === sheetName
+  );
+  const table = (applicationSheet?.tables || []).find(
+    (candidate) => candidate.name === "ApplicationsRegistry"
+  );
+  if (table) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: privateRegistryId,
+      requestBody: {
+        requests: [
+          {
+            updateTable: {
+              table: {
+                tableId: table.tableId,
+                range: {
+                  sheetId: applicationSheet.properties.sheetId,
+                  startRowIndex: 0,
+                  endRowIndex: existingRows.length + 1,
+                  startColumnIndex: 0,
+                  endColumnIndex: PRIVATE_APPLICATION_HEADER.length,
+                },
+              },
+              fields: "range",
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  return { added: additions.length, updated: updates.length };
+}
+
+export async function moveAppliedJobs(
+  spreadsheetId,
+  privateRegistryId,
+  now = new Date()
+) {
+  if (!spreadsheetId) {
+    throw new Error("GOOGLE_SHEET_ID env var is missing");
+  }
+  if (!privateRegistryId) {
+    throw new Error("PRIVATE_REGISTRY_SHEET_ID env var is missing");
+  }
+
+  const auth = buildAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const setup = await ensureSheets(sheets, spreadsheetId);
+  const sourceSheetNames = [
+    CONFIG.spreadsheet.backendSheetName,
+    CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.todaySheetName,
+    CONFIG.spreadsheet.stretchSheetName,
+    CONFIG.spreadsheet.rejectedSheetName,
+  ];
+  const appliedSheetName = CONFIG.spreadsheet.appliedSheetName;
+
+  for (const sheetName of [...sourceSheetNames, appliedSheetName]) {
+    await ensureSchema(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      ACTIVE_HEADER
+    );
+  }
+  const appliedSheet = setup.sheets.find(
+    (sheet) => sheet.properties.title === appliedSheetName
+  );
+  if (appliedSheet) {
+    await ensureFormatting(sheets, spreadsheetId, appliedSheet);
+  }
+
+  const sourceRowsBySheet = {};
+  for (const sheetName of sourceSheetNames) {
+    const values = await getRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      columnsForHeader(ACTIVE_HEADER)
+    );
+    sourceRowsBySheet[sheetName] = values.slice(1);
+  }
+  const appliedValues = await getRows(
+    sheets,
+    spreadsheetId,
+    appliedSheetName,
+    columnsForHeader(ACTIVE_HEADER)
+  );
+  const plan = planAppliedMove(
+    sourceRowsBySheet,
+    appliedValues.slice(1)
+  );
+  if (!plan.movedCount) {
+    console.log("Applied jobs: nothing new to move.");
+    return { moved: 0, removed: 0, registryAdded: 0, registryUpdated: 0 };
+  }
+
+  const today = todayISO(now);
+  const registryResult = await syncAppliedToPrivateRegistry(
+    sheets,
+    privateRegistryId,
+    plan.movedRows,
+    today
+  );
+  await overwriteRows(
+    sheets,
+    spreadsheetId,
+    appliedSheetName,
+    ACTIVE_HEADER,
+    sortRowsNewestFirst(plan.appliedRows)
+  );
+
+  let removed = 0;
+  for (const sheetName of sourceSheetNames) {
+    const originalCount = sourceRowsBySheet[sheetName].filter((row) =>
+      row.some(Boolean)
+    ).length;
+    const remaining = plan.remainingBySheet[sheetName];
+    removed += originalCount - remaining.length;
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      ACTIVE_HEADER,
+      sortRowsNewestFirst(remaining)
+    );
+  }
+  console.log(
+    `Applied jobs: ${plan.movedCount} consolidated, ${removed} view rows removed; ` +
+      `${registryResult.added} private rows added, ${registryResult.updated} updated.`
+  );
+  return {
+    moved: plan.movedCount,
+    removed,
+    registryAdded: registryResult.added,
+    registryUpdated: registryResult.updated,
+  };
+}
+
 export async function writeJobsToSheets(
   results,
   sourceHealth,
@@ -1064,6 +1441,7 @@ export async function writeJobsToSheets(
     CONFIG.spreadsheet.todaySheetName,
     CONFIG.spreadsheet.stretchSheetName,
     CONFIG.spreadsheet.rejectedSheetName,
+    CONFIG.spreadsheet.appliedSheetName,
   ];
 
   for (const sheetName of activeSheetNames) {

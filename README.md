@@ -42,6 +42,7 @@ The tracker manages these tabs:
 - **Stretch Roles** — hands-on Lead, Staff, Principal, and architecture roles
   that meet the minimum review score.
 - **Rejected Jobs** — rejected roles and reasons, retained for 30 days.
+- **Applied Jobs** — one consolidated copy of every role you mark Applied.
 - **Archived Jobs** — jobs moved out of active views every two months,
   including Status and Notes.
 - **Source Health** — current count, warning streak, and status for each
@@ -76,6 +77,14 @@ Recommendation tabs use these columns:
 Rows marked `⭐ PRIORITY` are automatically highlighted in green.
 Status and Notes entered in **Today** are synchronized back to the matching
 active Backend or Product row before the daily shortlist is refreshed.
+
+When a job's Status is set to **Applied**, the daily workflow moves every copy
+of that job out of Backend Jobs, Product Jobs, Today, Stretch Roles, and
+Rejected Jobs into **Applied Jobs**. The same privacy-safe operation is also
+available on demand from **Actions → Move Applied Jobs → Run workflow**. It
+updates the private Applications registry before removing active-view copies,
+so later searches do not add the job back. Workflow logs contain aggregate
+counts only.
 
 ### Existing spreadsheet migration
 

@@ -31,6 +31,7 @@ export const CONFIG = {
     todaySheetName: "Today",
     stretchSheetName: "Stretch Roles",
     rejectedSheetName: "Rejected Jobs",
+    appliedSheetName: "Applied Jobs",
     archiveSheetName: "Archived Jobs",
     sourceHealthSheetName: "Source Health",
     resetEveryMonths: 2,
