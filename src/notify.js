@@ -110,6 +110,33 @@ export function buildJobEmail(jobs, now = new Date()) {
   };
 }
 
+export async function sendGmailMessage(message, env = process.env) {
+  const sender = env.GMAIL_ADDRESS;
+  const recipient = env.NOTIFICATION_EMAIL;
+  const clientId = env.GMAIL_OAUTH_CLIENT_ID;
+  const clientSecret = env.GMAIL_OAUTH_CLIENT_SECRET;
+  const refreshToken = env.GMAIL_OAUTH_REFRESH_TOKEN;
+  if (
+    !sender ||
+    !recipient ||
+    !clientId ||
+    !clientSecret ||
+    !refreshToken
+  ) {
+    throw new Error("Gmail API environment configuration is incomplete");
+  }
+
+  const oauth = new google.auth.OAuth2(clientId, clientSecret);
+  oauth.setCredentials({ refresh_token: refreshToken });
+  const gmail = google.gmail({ version: "v1", auth: oauth });
+  await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {
+      raw: buildRawGmailMessage(message, sender, recipient),
+    },
+  });
+}
+
 export async function sendDailyJobEmail(
   jobs,
   env = process.env,
@@ -137,15 +164,7 @@ export async function sendDailyJobEmail(
   }
 
   const message = buildJobEmail(jobs, now);
-  const oauth = new google.auth.OAuth2(clientId, clientSecret);
-  oauth.setCredentials({ refresh_token: refreshToken });
-  const gmail = google.gmail({ version: "v1", auth: oauth });
-  await gmail.users.messages.send({
-    userId: "me",
-    requestBody: {
-      raw: buildRawGmailMessage(message, sender, recipient),
-    },
-  });
+  await sendGmailMessage(message, env);
   console.log(`Email notification: sent ${jobs.length} recommended jobs.`);
   return { sent: true, count: jobs.length };
 }

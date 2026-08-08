@@ -6,6 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "gmail:test": "node src/gmail-check.js",
     "move:applied": "node src/move-applied.js",
     "reset:sheets": "node src/reset.js",
     "test": "node --test && node src/index.js --dry-run",

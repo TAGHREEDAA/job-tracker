@@ -6,6 +6,7 @@ import {
   buildRawGmailMessage,
   selectNotificationJobs,
   sendDailyJobEmail,
+  sendGmailMessage,
 } from "../src/notify.js";
 
 function job(overrides = {}) {
@@ -66,4 +67,14 @@ test("builds a Gmail API MIME message without allowing header injection", () => 
 test("does not send when no matching jobs exist", async () => {
   const result = await sendDailyJobEmail([], {});
   assert.deepEqual(result, { sent: false, reason: "empty" });
+});
+
+test("refuses a Gmail API send with incomplete credentials", async () => {
+  await assert.rejects(
+    sendGmailMessage(
+      { subject: "Test", text: "Test", html: "<p>Test</p>" },
+      {}
+    ),
+    /environment configuration is incomplete/
+  );
 });

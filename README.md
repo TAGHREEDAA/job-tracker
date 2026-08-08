@@ -110,6 +110,11 @@ access. Configure these encrypted GitHub Actions secrets:
 The repository and workflow logs never print these values. The email contains
 only title, company, score, and job URL.
 
+Use Google's OAuth Playground once to obtain the refresh token, then store all
+five values directly as repository Actions secrets. The **Test Gmail API**
+workflow verifies the GitHub-hosted integration without requiring local
+credentials or a local authorization server.
+
 ### Existing spreadsheet migration
 
 If the spreadsheet still has the original **Jobs** tab, the next real run:
