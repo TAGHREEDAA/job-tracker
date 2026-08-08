@@ -70,12 +70,11 @@ export function buildAuth() {
     throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON env var is missing");
   }
   const credentials = JSON.parse(credsJson);
-  return new google.auth.JWT(
-    credentials.client_email,
-    null,
-    credentials.private_key,
-    ["https://www.googleapis.com/auth/spreadsheets"]
-  );
+  return new google.auth.JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
 }
 
 function a1Range(sheetName, cells) {
