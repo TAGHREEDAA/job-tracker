@@ -10,6 +10,7 @@ import {
   jobToRow,
   legacyRowToActive,
   planAppliedMove,
+  partitionRowsByRejectedJobs,
   sortRowsNewestFirst,
   withinRetention,
 } from "../src/sheets.js";
@@ -213,4 +214,36 @@ test("moves only an exact Applied status", () => {
   assert.equal(isAppliedStatus(" applied "), true);
   assert.equal(isAppliedStatus("Interview"), false);
   assert.equal(isAppliedStatus("Rejected"), false);
+});
+
+test("reconciles newly rejected jobs out of active rows", () => {
+  const rejected = jobToRow(
+    {
+      title: "Fullstack Engineer",
+      company: "Lago",
+      url: "https://jobs.workable.com/view/lago-role",
+      dedupeKey: "lago-role",
+    },
+    "2026-08-11"
+  );
+  rejected[18] = "Reviewing";
+  const kept = jobToRow(
+    {
+      title: "Backend Engineer",
+      company: "Example",
+      url: "https://example.test/backend",
+      dedupeKey: "example-backend",
+    },
+    "2026-08-12"
+  );
+
+  const result = partitionRowsByRejectedJobs([rejected, kept], [
+    {
+      url: "https://jobs.workable.com/view/lago-role",
+      dedupeKey: "lago-role",
+    },
+  ]);
+
+  assert.deepEqual(result.remaining, [kept]);
+  assert.deepEqual(result.removed, [rejected]);
 });

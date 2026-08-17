@@ -126,6 +126,7 @@ const HARD_LOCATION_REJECTIONS = [
   /\bnorth america[\s/-]*only\b/i,
   /\bapac[\s/-]*only\b/i,
   /\basia pacific[\s/-]*only\b/i,
+  /\b(?:east|eastern) europe\b/i,
 ];
 
 const EXPLICIT_UNSUPPORTED_REMOTE_LOCATIONS = [
@@ -136,6 +137,22 @@ const EXPLICIT_UNSUPPORTED_REMOTE_LOCATIONS = [
 const DESCRIPTION_LOCATION_REJECTIONS = [
   /\bmust be (?:located|based|resident) in (?:the )?(?:us|u\.s\.|usa|united states|canada)\b/i,
   /\b(?:us|u\.s\.|usa|united states|canada) work authorization required\b/i,
+];
+
+const UNSUPPORTED_HIRING_SCOPE_PATTERNS = [
+  /\b(?:latin america|latam|south america|central america)\b/i,
+  /\b(?:north america|americas?)\b/i,
+  /\b(?:east|eastern) europe\b/i,
+  /\b(?:apac|asia pacific)\b/i,
+  /\b(?:philippines|serbia)\b/i,
+  ...EXPLICIT_UNSUPPORTED_REMOTE_LOCATIONS,
+];
+
+const DESCRIPTION_HIRING_SCOPE_PATTERNS = [
+  /\bremote(?:\s+(?:work|role|position|location))?\s*[:\-]\s*([^.;]{1,180})/gi,
+  /\b(?:eligible|approved|supported|available)\s+(?:hiring\s+)?locations?\s*[:\-]\s*([^.;]{1,180})/gi,
+  /\b(?:hiring|hire|employ|employment|candidates?|applicants?)\b.{0,50}\b(?:in|from|within)\s+([^.;]{1,180})/gi,
+  /\b(?:must|required to|need to)\s+be\s+(?:based|located|resident)\s+in\s+([^.;]{1,180})/gi,
 ];
 
 const HYBRID_OR_OFFICE_PATTERNS = [
@@ -219,6 +236,44 @@ function includesAny(haystack, values) {
 
 function matchesAny(value, patterns) {
   return patterns.some((pattern) => pattern.test(value));
+}
+
+function explicitHiringScope(description) {
+  const acceptedPatterns = [
+    ...EGYPT_MENA_PATTERNS,
+    ...WORLDWIDE_PATTERNS,
+    ...EMEA_AFRICA_PATTERNS,
+  ];
+  let unsupported = "";
+
+  for (const pattern of DESCRIPTION_HIRING_SCOPE_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of description.matchAll(pattern)) {
+      const scope = text(match[1]);
+      if (!scope) continue;
+      if (matchesAny(scope, acceptedPatterns)) {
+        return { accepted: scope, unsupported: "" };
+      }
+      if (
+        !unsupported &&
+        matchesAny(scope, UNSUPPORTED_HIRING_SCOPE_PATTERNS)
+      ) {
+        unsupported = scope;
+      }
+    }
+  }
+  return { accepted: "", unsupported };
+}
+
+function hasSpecificRemoteLocation(location) {
+  const remainder = lower(location)
+    .replace(/\b(?:work from home|remote|wfh|telecommute)\b/g, " ")
+    .replace(/\b(?:fully|only|role|position|job|work|location|based)\b/g, " ")
+    .replace(/\b100\s*%/g, " ")
+    .replace(/[^a-z]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Boolean(remainder);
 }
 
 function unique(values) {
@@ -337,6 +392,8 @@ export function analyzeEligibility(job) {
   const title = text(job.title);
   const location = text(job.location);
   const description = text(job.description);
+  const hiringScope = explicitHiringScope(description);
+  const eligibilityLocation = `${location} ${hiringScope.accepted}`;
 
   if (
     matchesAny(`${title} ${location}`, HYBRID_OR_OFFICE_PATTERNS) ||
@@ -361,16 +418,19 @@ export function analyzeEligibility(job) {
   }
   if (
     matchesAny(location, HARD_LOCATION_REJECTIONS) ||
-    matchesAny(description, DESCRIPTION_LOCATION_REJECTIONS)
+    matchesAny(description, DESCRIPTION_LOCATION_REJECTIONS) ||
+    hiringScope.unsupported
   ) {
     return {
       status: "Not eligible",
       points: 0,
       hardReject: true,
-      reason: "Hiring geography or work authorization excludes Egypt",
+      reason: hiringScope.unsupported
+        ? `Explicit hiring scope excludes Egypt/Africa: ${hiringScope.unsupported}`
+        : "Hiring geography or work authorization excludes Egypt",
     };
   }
-  const hasAcceptedLocation = matchesAny(location, [
+  const hasAcceptedLocation = matchesAny(eligibilityLocation, [
     ...EGYPT_MENA_PATTERNS,
     ...WORLDWIDE_PATTERNS,
     ...EMEA_AFRICA_PATTERNS,
@@ -386,7 +446,7 @@ export function analyzeEligibility(job) {
       reason: "Remote role is tied to a hiring country outside accepted regions",
     };
   }
-  if (matchesAny(location, EGYPT_MENA_PATTERNS)) {
+  if (matchesAny(eligibilityLocation, EGYPT_MENA_PATTERNS)) {
     return {
       status: "Eligible - Egypt/MENA/GCC",
       points: 30,
@@ -394,7 +454,7 @@ export function analyzeEligibility(job) {
       reason: "Egypt, MENA, or GCC eligibility",
     };
   }
-  if (matchesAny(location, WORLDWIDE_PATTERNS)) {
+  if (matchesAny(eligibilityLocation, WORLDWIDE_PATTERNS)) {
     return {
       status: "Eligible - Worldwide",
       points: 28,
@@ -402,7 +462,7 @@ export function analyzeEligibility(job) {
       reason: "Worldwide or anywhere hiring",
     };
   }
-  if (matchesAny(location, EMEA_AFRICA_PATTERNS)) {
+  if (matchesAny(eligibilityLocation, EMEA_AFRICA_PATTERNS)) {
     return {
       status: "Eligible - EMEA/Africa",
       points: 27,
@@ -420,6 +480,14 @@ export function analyzeEligibility(job) {
     };
   }
   if (matchesAny(location, REMOTE_PATTERNS)) {
+    if (hasSpecificRemoteLocation(location)) {
+      return {
+        status: "Not eligible",
+        points: 0,
+        hardReject: true,
+        reason: `Remote role is restricted to ${location.replace(/^remote\s*[·,;/|\-]*\s*/i, "")}`,
+      };
+    }
     return {
       status: "Probably eligible - Remote",
       points: 18,

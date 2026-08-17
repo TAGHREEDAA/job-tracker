@@ -230,6 +230,24 @@ function rowIdentity(row) {
   };
 }
 
+export function partitionRowsByRejectedJobs(rows, rejectedJobs) {
+  const urls = new Set(rejectedJobs.map((job) => job.url).filter(Boolean));
+  const dedupeKeys = new Set(
+    rejectedJobs.map((job) => job.dedupeKey).filter(Boolean)
+  );
+  const removed = [];
+  const remaining = [];
+
+  for (const row of rows) {
+    const identity = rowIdentity(row);
+    const rejected =
+      (identity.url && urls.has(identity.url)) ||
+      (identity.dedupeKey && dedupeKeys.has(identity.dedupeKey));
+    (rejected ? removed : remaining).push(row);
+  }
+  return { removed, remaining };
+}
+
 export function isAppliedStatus(value) {
   return normalizedStatus(value).toLowerCase() === "applied";
 }
@@ -911,6 +929,53 @@ async function writeActiveJobs(
   };
 }
 
+async function reconcileRejectedJobs(
+  sheets,
+  spreadsheetId,
+  rejectedJobs
+) {
+  const manualByIdentity = new Map();
+  if (!rejectedJobs.length) return manualByIdentity;
+
+  for (const sheetName of [
+    CONFIG.spreadsheet.backendSheetName,
+    CONFIG.spreadsheet.productSheetName,
+    CONFIG.spreadsheet.stretchSheetName,
+  ]) {
+    const values = await getRows(sheets, spreadsheetId, sheetName);
+    const rows = values
+      .slice(1)
+      .filter((row) => row.some(Boolean))
+      .map((row) => padRow(row, ACTIVE_HEADER.length));
+    const { removed, remaining } = partitionRowsByRejectedJobs(
+      rows,
+      rejectedJobs
+    );
+    if (!removed.length) continue;
+
+    for (const row of removed) {
+      const identity = rowIdentity(row);
+      const manual = {
+        dateFound: row[0],
+        status: normalizedStatus(row[18]),
+        notes: normalizedStatus(row[19]),
+      };
+      if (identity.url) manualByIdentity.set(`url:${identity.url}`, manual);
+      if (identity.dedupeKey) {
+        manualByIdentity.set(`key:${identity.dedupeKey}`, manual);
+      }
+    }
+    await overwriteRows(
+      sheets,
+      spreadsheetId,
+      sheetName,
+      ACTIVE_HEADER,
+      remaining
+    );
+  }
+  return manualByIdentity;
+}
+
 export async function removeSuppressedCompanyJobs(
   spreadsheetId,
   isSuppressedCompany
@@ -1102,7 +1167,8 @@ async function writeRejectedJobs(
   sheets,
   spreadsheetId,
   rejectedJobs,
-  today
+  today,
+  manualByIdentity = new Map()
 ) {
   const sheetName = CONFIG.spreadsheet.rejectedSheetName;
   const values = await getRows(sheets, spreadsheetId, sheetName);
@@ -1129,6 +1195,18 @@ async function writeRejectedJobs(
     }
   }
   const { fresh } = filterNewJobs(rejectedJobs, identities);
+  const freshRows = fresh.map((job) => {
+    const row = jobToRow(job, today);
+    const manual =
+      manualByIdentity.get(`url:${job.url}`) ||
+      manualByIdentity.get(`key:${job.dedupeKey}`);
+    if (manual) {
+      row[0] = manual.dateFound || row[0];
+      row[18] = manual.status;
+      row[19] = manual.notes;
+    }
+    return row;
+  });
   await overwriteRows(
     sheets,
     spreadsheetId,
@@ -1136,7 +1214,7 @@ async function writeRejectedJobs(
     ACTIVE_HEADER,
     [
       ...retained,
-      ...fresh.map((job) => jobToRow(job, today)),
+      ...freshRows,
     ]
   );
 }
@@ -1535,6 +1613,11 @@ export async function writeJobsToSheets(
 
   const today = todayISO();
   await syncTodayManualFields(sheets, spreadsheetId);
+  const rejectedManualByIdentity = await reconcileRejectedJobs(
+    sheets,
+    spreadsheetId,
+    results.rejected
+  );
   await archiveActiveJobsIfDue(sheets, spreadsheetId, today);
   const newlyAdded = await writeActiveJobs(
     sheets,
@@ -1557,7 +1640,8 @@ export async function writeJobsToSheets(
     sheets,
     spreadsheetId,
     results.rejected,
-    today
+    today,
+    rejectedManualByIdentity
   );
   await writeSourceHealth(
     sheets,
