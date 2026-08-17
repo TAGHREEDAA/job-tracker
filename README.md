@@ -17,7 +17,8 @@ On every run, the tracker:
    Working Nomads, Jobspresso, Product Jobs Anywhere, and Workable.
 2. Classifies roles as Laravel/PHP Backend, Backend, Product Engineer,
    backend-focused Full-Stack, Stretch, or Rejected.
-3. Separates remote work from actual Egypt/Africa hiring eligibility.
+3. Separates remote work from actual Egypt/Africa hiring eligibility, using
+   explicit hiring scopes in both structured locations and descriptions.
 4. Extracts stack, domain, product-ownership, and employment signals from the
    description text already supplied by each source.
 5. Produces a 0-100 fit score with match reasons, gaps, and confidence.
@@ -137,6 +138,10 @@ added back to the active views.
 
 Rejected jobs are retained for 30 days. Archived jobs do not block a genuinely
 reposted role from appearing again.
+
+When a currently active listing is reclassified as ineligible, the next run
+removes it from the active tabs and preserves its Date Found, Status, and Notes
+when moving it to **Rejected Jobs**.
 
 ## Setup
 

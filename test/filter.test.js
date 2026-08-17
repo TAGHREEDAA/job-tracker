@@ -99,6 +99,41 @@ test("separates remote work from Egypt hiring eligibility", () => {
     true
   );
   assert.equal(
+    analyzeEligibility(job({ location: "Remote · Serbia" })).hardReject,
+    true
+  );
+  const restrictedScope = analyzeEligibility(
+    job({
+      location: "Remote",
+      description:
+        "Build APIs with Laravel. Remote: Latin America, Philippines, Eastern Europe. Work with the product team.",
+    })
+  );
+  assert.equal(restrictedScope.hardReject, true);
+  assert.match(
+    restrictedScope.reason,
+    /Latin America, Philippines, Eastern Europe/i
+  );
+  assert.equal(
+    analyzeEligibility(
+      job({
+        location: "Remote",
+        description:
+          "Remote: worldwide. Our engineering team is located in Eastern Europe.",
+      })
+    ).status,
+    "Eligible - Worldwide"
+  );
+  assert.equal(
+    analyzeEligibility(
+      job({
+        location: "Remote",
+        description: "Eligible locations: EMEA, including Egypt and Africa.",
+      })
+    ).status,
+    "Eligible - Egypt/MENA/GCC"
+  );
+  assert.equal(
     analyzeEligibility(
       job({ location: "Remote · Worldwide · Toronto, Canada" })
     ).status,
